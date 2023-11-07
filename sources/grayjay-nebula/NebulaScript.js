@@ -57,7 +57,7 @@ source.getChannel = function (url) {
         .filter((v) => v !== '')
         .pop()
 
-    /** @type {import("./types.d.ts").Channel} */
+    /** @type {import("./types.ts").Channel} */
     const j = callUrl(`https://content.api.nebula.app/content/${login}`)
 
     return new PlatformChannel({
@@ -77,7 +77,7 @@ source.getChannelContents = function (url) {
         .filter((v) => v !== '')
         .pop()
 
-    /** @type {import("./types.d.ts").Channel} */
+    /** @type {import("./types.ts").Channel} */
     const j = callUrl(`https://content.api.nebula.app/content/${login}`)
 
     return new ChannelVideoPager({ next: null, id: j.id })
@@ -102,7 +102,7 @@ source.getContentDetails = function (url) {
 
     if(!bridge.isLoggedIn())
         throw new UnavailableException('Nebula videos are only available after login');
-    /** @type {import("./types.d.ts".ContentDetail)} */
+    /** @type {import("./types.ts".ContentDetail)} */
     const j = callUrl(`https://content.api.nebula.app/content/videos/${id}`, true)
 
     // const token = getToken()
@@ -194,7 +194,7 @@ function getToken() {
 }
 /**
  * Gets a list of links from a channel object
- * @param {import("./types.d.ts").Channel} c
+ * @param {import("./types.ts").Channel} c
  * @returns {string[]}
  */
 function getChannelLinks(c) {
@@ -209,13 +209,13 @@ function getChannelLinks(c) {
 //* Pagers
 class HomePager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").HomeContext} context
+     * @param {import("./types.ts").HomeContext} context
      */
     constructor(context) {
         let url = `https://content.api.nebula.app/video_episodes/?ordering=-published_at`
         if (context.next !== null) url = context.next
 
-        /** @type {import("./types.d.ts").HomeResponse} */
+        /** @type {import("./types.ts").HomeResponse} */
         const json = callUrl(url)
 
         const results = json.results.map((c) => contentToPlatformVideo(c))
@@ -232,14 +232,14 @@ class HomePager extends VideoPager {
 }
 class ChannelVideoPager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").ChannelContext} context the context
+     * @param {import("./types.ts").ChannelContext} context the context
      */
     constructor(context) {
         let url = `https://content.api.nebula.app/video_channels/${context.id}/video_episodes/?ordering=-published_at`
 
         if (context.next !== null) url = context.next
 
-        /** @type {import("./types.d.ts").ChannelContentResponse} */
+        /** @type {import("./types.ts").ChannelContentResponse} */
         const j = callUrl(url)
 
         const results = j.results.map((v) => contentToPlatformVideo(v))
@@ -255,10 +255,10 @@ class ChannelVideoPager extends VideoPager {
 }
 class SearchPager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").SearchContext} context
+     * @param {import("./types.ts").SearchContext} context
      */
     constructor(context) {
-        /** @type {import("./types.d.ts").SearchResponse}*/
+        /** @type {import("./types.ts").SearchResponse}*/
         const j = callUrl(`https://content.api.nebula.app/video_episodes/search/?include=&page=${context.page}&q=${context.q}`)
 
         const results = j.results.map((c) => contentToPlatformVideo(c))
@@ -274,14 +274,14 @@ class SearchPager extends VideoPager {
 class SearchPagerChannels extends ChannelPager {
     /**
      * Search channels
-     * @param {import("./types.d.ts").SearchChannelContext} context the context
+     * @param {import("./types.ts").SearchChannelContext} context the context
      */
     constructor(context) {
         let url = `https://content.api.nebula.app/video_channels/search/?include=&q=${context.q}`
 
         if (context.next !== null) url = context.next
 
-        /** @type {import("./types.d.ts").SearchChannelResponse} */
+        /** @type {import("./types.ts").SearchChannelResponse} */
         const j = callUrl(url)
 
         const results = j.results.map((v) => searchChannelToPlatformChannel(v))
@@ -298,7 +298,7 @@ class SearchPagerChannels extends ChannelPager {
 //* Converters
 /**
  * Convert a search channel to a platform channel
- * @param {import("./types.d.ts").Channel} c
+ * @param {import("./types.ts").Channel} c
  * @returns { PlatformChannel }
  */
 function searchChannelToPlatformChannel(c) {
@@ -315,7 +315,7 @@ function searchChannelToPlatformChannel(c) {
 }
 /**
  * Convert a content object to a platform video
- * @param { import("./types.d.ts").Content } c
+ * @param { import("./types.ts").Content } c
  * @returns { PlatformVideo }
  */
 function contentToPlatformVideo(c) {
@@ -338,7 +338,7 @@ function contentToPlatformVideo(c) {
 }
 /**
  * Converts a saved video to a platform video
- * @param {import("./types.d.ts").Content} c
+ * @param {import("./types.ts").Content} c
  * @param {string} manifest_url
  * @returns {PlatformVideoDetails}
  */

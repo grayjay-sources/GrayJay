@@ -28,7 +28,7 @@ source.searchSuggestions = function (query) {
 
     const resp = callUrl(url)
 
-    /** @type {import("./types").SearchAutofillResponse} */
+    /** @type {import("./types.ts").SearchAutofillResponse} */
     const json = JSON.parse(resp.body)
 
     if (!json['collection']) {
@@ -77,7 +77,7 @@ source.getChannel = function (url) {
         throw new ScriptException('Could not find channel info')
     }
 
-    /** @type {import("./types").SCHydration[]} */
+    /** @type {import("./types.ts").SCHydration[]} */
     const json = JSON.parse(matched[1])
 
     for (let object of json) {
@@ -123,9 +123,9 @@ source.getContentDetails = function (url) {
     /** @type {SCHydration[]} */
     const json = JSON.parse(matched[1])
 
-    /** @type {import("./types").SoundcloudTrack} */
+    /** @type {import("./types.ts").SoundcloudTrack} */
     let data
-    /** @type {import("./types").SoundcloudTrack} */
+    /** @type {import("./types.ts").SoundcloudTrack} */
     let sct
 
     for (let object of json) {
@@ -190,7 +190,7 @@ source.getUserSubscriptions = function () {
 
     const json = JSON.parse(resp.body)
 
-    /** @type {import("./types.d.ts").SoundcloudUser[]} */
+    /** @type {import("./types.ts").SoundcloudUser[]} */
     const users = json.collection
 
     return users.map((user) => user.permalink_url)
@@ -209,7 +209,7 @@ source.getUserPlaylists = function () {
     if(IS_TESTING)
         console.log(json)
 
-    /** @type {import("./types.d.ts").PlaylistWrapper[]} */
+    /** @type {import("./types.ts").PlaylistWrapper[]} */
     const playlists = json.collection
 
     return playlists.map((playlist) => {
@@ -249,7 +249,7 @@ source.getPlaylist = function (url) {
             break
         }
     }
-    /** @type {import("./types.d.ts").SoundcloudTrack[]} */
+    /** @type {import("./types.ts").SoundcloudTrack[]} */
     let tracks = []
 
     // split ids into chunks of 50
@@ -325,7 +325,7 @@ function getClientId() {
 
 /**
  * Gets the Soundcloud homepage content
- * @param {import("./types").HomeContext} context the search context
+ * @param {import("./types.ts").HomeContext} context the search context
  * @returns {PlatformVideo[]} returns the homepage content
  */
 function getHomepageContent(context) {
@@ -335,10 +335,10 @@ function getHomepageContent(context) {
 
     const resp = callUrl(url)
 
-    /** @type {import("./types").HomepageResponse} */
+    /** @type {import("./types.ts").HomepageResponse} */
     const json = JSON.parse(resp.body)
 
-    /** @type {import("./types").SoundcloudTrack[]} */
+    /** @type {import("./types.ts").SoundcloudTrack[]} */
     const tracks = json['collection']
 
     return tracks.map((track) => {
@@ -349,7 +349,7 @@ function getHomepageContent(context) {
 //* Pagers
 class QueryPager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").HomeContext} context the query params
+     * @param {import("./types.ts").HomeContext} context the query params
      */
     constructor(context) {
         const results = getHomepageContent(context)
@@ -364,7 +364,7 @@ class QueryPager extends VideoPager {
 }
 class SearchPagerVideos extends VideoPager {
     /**
-     * @param {import("./types").SearchContext} context the query params
+     * @param {import("./types.ts").SearchContext} context the query params
      */
     constructor(context) {
         if (context.get_all) {
@@ -378,7 +378,7 @@ class SearchPagerVideos extends VideoPager {
 
             const resp = callUrl(url)
 
-            /** @type {import("./types").AnySearchResponse} */
+            /** @type {import("./types.ts").AnySearchResponse} */
             const json = JSON.parse(resp.body)
 
             if (json['collection'] === undefined) {
@@ -432,7 +432,7 @@ class SearchPagerVideos extends VideoPager {
 }
 class ChannelVideoPager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").ChannelVideoPagerContext} context
+     * @param {import("./types.ts").ChannelVideoPagerContext} context
      */
     constructor(context) {
         if (!context.id) {
@@ -442,12 +442,12 @@ class ChannelVideoPager extends VideoPager {
                 throw new ScriptException('Could not find channel info')
             }
 
-            /** @type {import("./types").SCHydration[]} */
+            /** @type {import("./types.ts").SCHydration[]} */
             const json = JSON.parse(matched[1])
 
             for (let object of json) {
                 if (object.hydratable === 'user') {
-                    /** @type {import("./types").SoundcloudUser} */
+                    /** @type {import("./types.ts").SoundcloudUser} */
                     const data = object.data
 
                     context.id = data.id
@@ -464,7 +464,7 @@ class ChannelVideoPager extends VideoPager {
         const resp = callUrl(url)
         const parsed = JSON.parse(resp.body)
 
-        /** @type {import("./types").SoundcloudTrack[]} */
+        /** @type {import("./types.ts").SoundcloudTrack[]} */
         const tracks = parsed['collection']
 
         const videos = tracks.map((track) => soundcloudTrackToPlatformVideo(track))
@@ -481,7 +481,7 @@ class ChannelVideoPager extends VideoPager {
 }
 class SearchPagerChannels extends ChannelPager {
     /**
-     * @param {import("./types").SearchContext} context the query params
+     * @param {import("./types.ts").SearchContext} context the query params
      */
     constructor(context) {
         const limit = context.page_size
@@ -508,7 +508,7 @@ class SearchPagerChannels extends ChannelPager {
 }
 class ExtendableCommentPager extends CommentPager {
     /**
-     * @param {import("./types.d.ts").HomeContext & {url: string; id: number|null}} context
+     * @param {import("./types.ts").HomeContext & {url: string; id: number|null}} context
      */
     constructor(context) {
         if (!context.id) {
@@ -519,12 +519,12 @@ class ExtendableCommentPager extends CommentPager {
                 throw new ScriptException('Could not find comment info')
             }
 
-            /** @type {import("./types").SCHydration[]} */
+            /** @type {import("./types.ts").SCHydration[]} */
             const json = JSON.parse(matched[1])
 
             for (let object of json) {
                 if (object.hydratable === 'sound') {
-                    /** @type {import("./types").SoundcloudTrack} */
+                    /** @type {import("./types.ts").SoundcloudTrack} */
                     const data = object.data
 
                     context.id = data.id
@@ -541,7 +541,7 @@ class ExtendableCommentPager extends CommentPager {
 
         const resp = callUrl(url)
 
-        /** @type {import("./types").CommentResponse} */
+        /** @type {import("./types.ts").CommentResponse} */
         const json = JSON.parse(resp.body)
 
         const comments = json['collection'].map((comment) => {
@@ -573,7 +573,7 @@ class ExtendableCommentPager extends CommentPager {
 //* CONVERTERS
 /**
  * Convert a Soundcloud person to a PlatformChannel
- * @param { import("./types").SoundcloudUser } scu
+ * @param { import("./types.ts").SoundcloudUser } scu
  * @returns { PlatformChannel }
  */
 function soundcloudUserToPlatformChannel(scu) {
@@ -591,7 +591,7 @@ function soundcloudUserToPlatformChannel(scu) {
 
 /**
  * Convert a Soundcloud Track to a PlatformVideo
- * @param { import("./types").SoundcloudTrack } sct
+ * @param { import("./types.ts").SoundcloudTrack } sct
  * @returns { PlatformVideo }
  */
 function soundcloudTrackToPlatformVideo(sct) {

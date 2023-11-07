@@ -15,7 +15,7 @@ source.getHome = function () {
 source.searchSuggestions = function (query) {
     const gql = { searches: [{ preset: 'channel_search', q: query }] }
 
-    /** @type {import("./types.d.ts").MultiSearchResponse} */
+    /** @type {import("./types.ts").MultiSearchResponse} */
     const result = http.POST('https://search.kick.com/multi_search', JSON.stringify(gql), {
         'Content-Type': 'application/json',
         'User-Agent': USER_AGENT,
@@ -57,7 +57,7 @@ source.isChannelUrl = function (url) {
 source.getChannel = function (url) {
     const login = url.split('/').pop()
 
-    /** @type {import("./types.d.ts").ChannelResponse} */
+    /** @type {import("./types.ts").ChannelResponse} */
     const j = callUrl(`https://kick.com/api/v1/channels/${login}`)
 
     return new PlatformChannel({
@@ -96,7 +96,7 @@ source.getContentDetails = function (url) {
     }
 }
 source.getUserSubscriptions = function () {
-    /** @type {import("./types.d.ts").FollowedChannelResponse} */
+    /** @type {import("./types.ts").FollowedChannelResponse} */
     const j = callUrl('https://kick.com/api/v2/channels/followed?cursor=0', true)
 
     return j.channels.map((c) => BASE_URL + c.channel_slug)
@@ -164,7 +164,7 @@ function callUrl(url, use_authenticated = false, parse_response = true) {
 function getSavedVideo(url) {
     const id = url.split('/').pop()
 
-    /** @type {import("./types.d.ts").VideoResponse}*/
+    /** @type {import("./types.ts").VideoResponse}*/
     const j = callUrl(`https://kick.com/api/v1/video/${id}`)
 
     return savedVideoToPlatformVideo(j)
@@ -178,7 +178,7 @@ function getSavedVideo(url) {
 function getLiveVideo(url, throw_if_not_live = true) {
     const login = url.split('/').pop()
 
-    /** @type {import("./types.d.ts").ChannelResponse} */
+    /** @type {import("./types.ts").ChannelResponse} */
     const j = callUrl(`https://kick.com/api/v2/channels/${login}`)
 
     if (j.livestream === null) {
@@ -193,10 +193,10 @@ function getLiveVideo(url, throw_if_not_live = true) {
 //* Pagers
 class HomePager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").HomeContext} context
+     * @param {import("./types.ts").HomeContext} context
      */
     constructor(context) {
-        /** @type {import("./types.d.ts").FeaturedStreamResponse} */
+        /** @type {import("./types.ts").FeaturedStreamResponse} */
         const json = callUrl(`https://kick.com/stream/livestreams/en?page=${context.page}&limit=${context.page_size}&sort=featured`)
 
         const results = json.data.map((s) => streamToPlatformVideo(s))
@@ -215,7 +215,7 @@ class SearchPagerChannels extends ChannelPager {
      * @param {string} query
      */
     constructor(query) {
-        /** @type {import("./types.d.ts").SearchResponse} */
+        /** @type {import("./types.ts").SearchResponse} */
         const j = callUrl(`https://kick.com/api/search?searched_word=${query}`)
 
         const results = j.channels.map((u) => searchChannelToPlatformChannel(u))
@@ -233,7 +233,7 @@ function parseMessage(msg) {
         msg = JSON.parse(msg)
     }
 
-    /** @type {import("./types.d.ts").ChatroomMessage} */
+    /** @type {import("./types.ts").ChatroomMessage} */
     const data = msg
     // example with emotes: "Yes [emote:37233:PogU]" or "Yes [emote:37233:]"
     let content = data.content
@@ -264,10 +264,10 @@ class LiveEventPagerHelper extends LiveEventPager {
         super([], true)
         const me = this
 
-        /** @type {import("./types.d.ts").ChannelResponse} */
+        /** @type {import("./types.ts").ChannelResponse} */
         const resp = callUrl(`https://kick.com/api/v2/channels/${channel_login}`)
     
-        /** @type {import("./types.d.ts").PrepopulateChatResponse}*/
+        /** @type {import("./types.ts").PrepopulateChatResponse}*/
         const j = callUrl(`https://kick.com/api/v2/channels/${resp.id}/messages`)
     
         const parsed = j.data.messages.map((m) => parseMessage(m))
@@ -292,7 +292,7 @@ class LiveEventPagerHelper extends LiveEventPager {
             message(msg) {
                 if ((new Date().getTime() - me.lastFetch) / 1000 > 10) socket.close()
                 // {"event":"App\\Events\\ChatMessageEvent","data":"{\"id\":\"acfc6ccc-c39b-4929-9911-e49867325b76\",\"chatroom_id\":32806,\"content\":\"[emote:37226:KEKW]\",\"type\":\"message\",\"created_at\":\"2023-07-14T21:10:02+00:00\",\"sender\":{\"id\":228242,\"username\":\"izzywrotethis\",\"slug\":\"izzywrotethis\",\"identity\":{\"color\":\"#F2708A\",\"badges\":[{\"type\":\"moderator\",\"text\":\"Moderator\"},{\"type\":\"subscriber\",\"text\":\"Subscriber\",\"count\":3}]}}}","channel":"chatrooms.32806.v2"}
-                /** @type {import("./types.d.ts").ChatroomMessageResponse} */
+                /** @type {import("./types.ts").ChatroomMessageResponse} */
                 const parsed = JSON.parse(msg)
                 if (parsed.event === 'App\\Events\\ChatMessageEvent') {
                     const { message, emojis } = parseMessage(parsed.data)
@@ -312,12 +312,12 @@ class LiveEventPagerHelper extends LiveEventPager {
 }
 class ChannelVideoPager extends VideoPager {
     /**
-     * @param {import("./types.d.ts").URLContext} context the context
+     * @param {import("./types.ts").URLContext} context the context
      */
     constructor(context) {
         const login = context.url.split('/').pop()
 
-        /** @type {import("./types.d.ts").ChannelResponse} */
+        /** @type {import("./types.ts").ChannelResponse} */
         const j = callUrl(`https://kick.com/api/v1/channels/${login}`)
 
         let results = j.previous_livestreams.map((v) => previousLivestreamToPlatformVideo(v, j.user, j.slug))
@@ -332,7 +332,7 @@ class ChannelVideoPager extends VideoPager {
 //* Converters
 /**
  * Converts a livestream to a PlatformVideo
- * @param {import("./types.d.ts").ChannelResponse} j
+ * @param {import("./types.ts").ChannelResponse} j
  * @returns {PlatformVideoDetails}
  */
 function liveVideoToPlatformVideo(j) {
@@ -358,7 +358,7 @@ function liveVideoToPlatformVideo(j) {
 }
 /**
  * Convert a search channel to a platform channel
- * @param {import("./types.d.ts").SearchChannel} c
+ * @param {import("./types.ts").SearchChannel} c
  * @returns { PlatformChannel }
  */
 function searchChannelToPlatformChannel(c) {
@@ -375,7 +375,7 @@ function searchChannelToPlatformChannel(c) {
 }
 /**
  * Convert a Live Kick to a PlatformVideo
- * @param { import("./types.d.ts").Stream } s
+ * @param { import("./types.ts").Stream } s
  * @returns { PlatformVideo }
  */
 function streamToPlatformVideo(s) {
@@ -398,8 +398,8 @@ function streamToPlatformVideo(s) {
 }
 /**
  * Convert a previous livestream to a PlatformVideo
- * @param { import("./types.d.ts").PreviousLivestream } s
- * @param { import("./types.d.ts").User } u
+ * @param { import("./types.ts").PreviousLivestream } s
+ * @param { import("./types.ts").User } u
  * @param { string } slug
  * @returns { PlatformVideo }
  */
@@ -418,7 +418,7 @@ function previousLivestreamToPlatformVideo(s, u, slug) {
 }
 /**
  * Converts a saved video to a platform video
- * @param {import("./types.d.ts").VideoResponse} j
+ * @param {import("./types.ts").VideoResponse} j
  * @returns {PlatformVideoDetails}
  */
 function savedVideoToPlatformVideo(j) {
