@@ -175,7 +175,7 @@ dependencies {
     implementation 'androidx.navigation:navigation-ui-ktx:2.5.3'
 
     //Other
-    implementation 'org.jmdns:jmdns:3.5.1'
+    implementation 'org.jmdns:jmdns:3.5.8'
     implementation 'org.jsoup:jsoup:1.15.3'
     implementation 'com.google.android.flexbox:flexbox:3.0.0'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
