@@ -11,8 +11,8 @@ const CLAIM_TYPE_STREAM = "stream";
 const ORDER_BY_RELEASETIME = "release_time";
 		
 const REGEX_DETAILS_URL = new RegExp("lbry://(.*?)#(.*)");
-const REGEX_CHANNEL_URL = new RegExp("lbry://@(.*?)#(.*)");
-const REGEX_CHANNEL_URL2 = new RegExp("https://odysee.com/@(.*)");
+const REGEX_CHANNEL_URL = /lbry:\/\/([^\/\n\r:#]+)(?::[0-9a-fA-F]+)?(?:#([0-9a-fA-F]+))?/;
+const REGEX_CHANNEL_URL2 = /https:\/\/odysee.com\/([^\/\n\r:#]+)(?::[0-9a-fA-F]+)?(?:#([0-9a-fA-F]+))?/;
 
 const PLATFORM = "Odysee";
 const PLATFORM_CLAIMTYPE = 3;
@@ -81,15 +81,22 @@ source.getSearchChannelContentsCapabilities = function () {
 	};
 };
 source.searchChannelContents = function (channelUrl, query, type, order, filters) {
-	if (REGEX_CHANNEL_URL.test(channelUrl)) {
-		const channelId = channelUrl.split('#')[1];
-		return getSearchPagerVideos(query, false, 0, channelId);
-	} else if (REGEX_CHANNEL_URL2.test(channelUrl)) {
-		const c = source.getChannel(channelUrl);
-		return getSearchPagerVideos(query, false, 0, c.id.value);
-	} else {
+	let urlMatch = REGEX_CHANNEL_URL.exec(channelUrl);
+	if (!urlMatch) {
+		urlMatch = REGEX_CHANNEL_URL2.exec(channelUrl);
+	}
+	if (!urlMatch) {
 		throw new ScriptException("Channel search not implemented for this URL type");
 	}
+
+	const channelId = urlMatch[2];
+	if (!channelId) {
+		const curl = `${URL_BASE}/${urlMatch[1]}`;
+		const c = source.getChannel(curl);
+		return getSearchPagerVideos(query, false, 0, c.id.value);
+	}
+
+	return getSearchPagerVideos(query, false, 0, channelId);
 };
 
 source.searchChannels = function (query) {
@@ -100,17 +107,10 @@ source.searchChannels = function (query) {
 source.isChannelUrl = function(url) {
 	return REGEX_CHANNEL_URL.test(url) || REGEX_CHANNEL_URL2.test(url);
 };
-source.getChannel = function(url) {
-    if(REGEX_CHANNEL_URL2.test(url)) {
-        const indexAt = url.indexOf("@")
-        let channelId = url.substring(indexAt);
-        const indexQuery = channelId.indexOf("?");
-        if(indexQuery > 0)
-            channelId = channelId.substring(0, indexQuery);
-        const indexSlash = channelId.indexOf("/");
-        if(indexSlash > 0)
-            channelId = channelId.substring(0, indexSlash);
-        url = "lbry://" + channelId;
+source.getChannel = function (url) {
+	const urlMatch = REGEX_CHANNEL_URL2.exec(url);
+	if (urlMatch) {
+		url = "lbry://" + urlMatch[1];
     }
 
 	let channels = resolveClaimsChannel([url]);
@@ -118,10 +118,24 @@ source.getChannel = function(url) {
 	channel.subscribers = getChannelSubCount(channel.url);
 	return channel;
 };
-source.getChannelContents = function(url) {
-	const claimId = url.match(REGEX_CHANNEL_URL)[2];
+source.getChannelContents = function (url) {
+	let urlMatch = REGEX_CHANNEL_URL.exec(url);
+	if (!urlMatch) {
+		urlMatch = REGEX_CHANNEL_URL2.exec(url);
+	}
+	if (!urlMatch) {
+		throw new ScriptException("Channel search not implemented for this URL type");
+	}
+
+	let channelId = urlMatch[2];
+	if (!channelId) {
+		const curl = `${URL_BASE}/${urlMatch[1]}`;
+		const c = source.getChannel(curl);
+		channelId = c.id.value;
+	}
+
 	return getQueryPager({
-		channel_ids: [claimId],
+		channel_ids: [channelId],
 		page: 1,
 		page_size: 8,
 		claim_type: [CLAIM_TYPE_STREAM],
@@ -236,6 +250,8 @@ function getCommentsPager(contextUrl, claimId, page, topLevel, parentId = null) 
 //Internals
 function getOdyseeContentData() {
 	const resp = http.GET(URL_CONTENT, {});
+	if(!resp.isOk)
+	    throw new ScriptException("Failed request [" + URL_CONTENT + "] (" + resp.code + ")");
 	const contentResp = JSON.parse(resp.body);
 	
 	return contentResp.data["en"];

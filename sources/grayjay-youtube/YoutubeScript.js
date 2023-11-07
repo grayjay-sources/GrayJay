@@ -145,13 +145,10 @@ source.enable = (conf, settings, saveStateStr) => {
         const batchResp = batchReq.execute();
 
 		console.log("batchResp", batchResp);
-		if (!batchResp[0].isOk) {
-			if (batchResp[0].code === 429 && batchResp[0].body.includes("captcha")) {
-				throw new CaptchaRequiredException(batchResp[0].url, batchResp[0].body);
-			}
-
+		throwIfCaptcha(batchResp[0])
+		if (!batchResp[0].isOk)
 			throw new ScriptException("Failed to request context enable !batchResp[0].isOk");
-		}
+
         if(isLoggedIn && !batchResp[1].isOk) throw new ScriptException("Failed to request context enable isLoggedIn && !batchResp[1].isOk");
 
         _clientContext = getClientConfig(batchResp[0].body)//requestClientConfig(false);
@@ -332,6 +329,7 @@ source.getContentDetails = (url, useAuth) => {
 		batch.GET(URL_YOUTUBE_DISLIKES + videoId, {}, false);
 	const resps = batch.execute();
 
+    throwIfCaptcha(resps[0]);
 	if(!resps[0].isOk)
 		throw new ScriptException("Failed to request page [" + resps[0].code + "]");
 
@@ -371,6 +369,8 @@ source.getContentDetails = (url, useAuth) => {
 	const videoDetails = extractVideoPage_VideoDetails(initialData, initialPlayerData, {
 		url: url
 	}, jsUrl);
+	if(videoDetails == null)
+	    return new UnavailableException("No video found");
 
 	if(!videoDetails.live && 
 		(videoDetails.video?.videoSources == null || videoDetails.video.videoSources.length == 0) &&
@@ -439,14 +439,40 @@ source.getContentDetails = (url, useAuth) => {
 	return finalResult;
 };
 source.getContentChapters = function(url, initialData) {
+    //return [];
 	if(initialData == null) {
 		const html = requestPage(url);
 		initialData = getInitialData(html);
 	}
-	const rawObjects = initialData?.playerOverlays?.playerOverlayRenderer?.decoratedPlayerBarRenderer?.playerBar?.multiMarkersPlayerBarRenderer?.markersMap;
+	let rawObjects = initialData?.playerOverlays?.playerOverlayRenderer?.decoratedPlayerBarRenderer;
+	if(rawObjects?.decoratedPlayerBarRenderer)
+	    rawObjects = rawObjects.decoratedPlayerBarRenderer?.playerBar?.multiMarkersPlayerBarRenderer?.markersMap;
+	else
+	    rawObjects = rawObjects.playerBar?.multiMarkersPlayerBarRenderer?.markersMap;
+
 	if(!rawObjects || rawObjects.length == 0)
-		return null;
-	
+		return [];
+
+    const chapters = rawObjects.find(x=>x.key == "DESCRIPTION_CHAPTERS") ?? rawObjects.find(x=>x.key == "AUTO_CHAPTERS");
+    if(chapters?.value?.chapters == null)
+        return [];
+
+    let result = [];
+    const validChapters = chapters.value.chapters.filter(x=> x.chapterRenderer &&  x.chapterRenderer.title && (x.chapterRenderer.timeRangeStartMillis || x.chapterRenderer.timeRangeStartMillis === 0))
+    for(let i = 0; i < validChapters.length; i++) {
+        const chapter = validChapters[i]?.chapterRenderer;
+        const chapterNext = (i + 1 < validChapters.length) ? validChapters[i + 1]?.chapterRenderer : null;
+
+        const resultChapter = {
+            name: extractText_String(chapter.title),
+            timeStart: parseInt(chapter.timeRangeStartMillis / 1000),
+            timeEnd: (chapterNext?.timeRangeStartMillis) ? parseInt(chapterNext.timeRangeStartMillis / 1000) : 999999, //Easier than re-parsing video end,
+            type: Type.Chapter.NORMAL
+        };
+        result.push(resultChapter);
+    }
+
+    return result;
 }
 
 source.getLiveChatWindow = function(url) {
@@ -656,6 +682,8 @@ source.isChannelUrl = (url) => {
 };
 source.getChannel = (url) => {
 	const initialData = requestInitialData(url);
+	if(!initialData)
+	    throw new ScriptException("No channel data found for: " + url);
 	return extractChannel_PlatformChannel(initialData, url);
 };
 
@@ -671,6 +699,7 @@ source.getChannelContents = (url, type, order, filters) => {
 	switch(type) {
 		case undefined:
 		case null:
+		case "":
 		case Type.Feed.Videos:
 			targetTab = "Videos";
 			url = url + URL_CHANNEL_VIDEOS;
@@ -692,6 +721,8 @@ source.getChannelContents = (url, type, order, filters) => {
 		log("USING AUTH FOR CHANNEL");
 
 	const initialData = requestInitialData(url, false, useAuth);
+	if(!initialData)
+	    throw new ScriptException("No channel data found for: " + url);
 	const channel = extractChannel_PlatformChannel(initialData, url);
 	const contextData = {
 		authorLink: new PlatformAuthorLink(new PlatformID(PLATFORM, channel.id.value, config.id, PLATFORM_CLAIMTYPE), channel.name, channel.url, channel.thumbnail)
@@ -989,6 +1020,13 @@ source.getUserSubscriptions = function() {
 
 
 //#endregion
+
+function throwIfCaptcha(resp) {
+    if (resp != null && resp.code === 429 && resp.body != null && resp.body.includes("captcha")) {
+        throw new CaptchaRequiredException(resp.url, resp.body);
+    }
+}
+
 
 function extractVideoIDFromUrl(url) {
 	let match = url.match(REGEX_VIDEO_URL_DESKTOP);
@@ -1554,6 +1592,8 @@ function requestPage(url, headers, useAuth = false) {
 	headers = headers ?? {};
 	const headersUsed = Object.assign(headers, {"Accept-Language": "en-US"});
 	const resp = http.GET(url, headersUsed, useAuth);
+	throwIfCaptcha(resp);
+
 	if(resp.isOk)
 		return resp.body;
 	else throw new ScriptException("Failed to request page [" + resp.code + "]");
@@ -1564,8 +1604,30 @@ function requestInitialData(url, useMobile = false, useAuth = false) {
 		headers["User-Agent"] = USER_AGENT_TABLET;
 
 	const resp = http.GET(url, headers, useAuth);
+	throwIfCaptcha(resp);
 	if(resp.isOk) {
-		const html = resp.body;
+		let html = resp.body;
+
+		if(html.indexOf("<form action=\"https://consent.youtube.com/save\"") > 0) {
+		    log("Consent form required");
+		    const consentData = "gl=US&m=0&app=0&pc=yt&continue=" + encodeURIComponent(url) + "&x=6&bl=boq_identityfrontenduiserver_20231017.04_p0&hl=en&src=1&cm=2&set_eom=true";
+		    const respConsent = http.POST("https://consent.youtube.com/save", consentData,
+		    {
+		        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+		        "Accept-Language": "en-US",
+		        "Content-Type": "application/x-www-form-urlencoded"
+		    }, useAuth);
+            throwIfCaptcha(respConsent);
+		    if(respConsent.isOk) {
+                const body = respConsent.body;
+                if(respConsent.body.indexOf("<form action=\"https://consent.youtube.com/save\"") > 0)
+                    throw new CriticalException("Failed to refuse Google consent [" + respConsent.code + "]")
+                else
+                    html = respConsent.body;
+		    }
+		    else throw new CriticalException("Failed to refuse Google consent [" + resp.code + "]");
+		}
+
 		const initialData = getInitialData(html);
 		return initialData;
 	}
@@ -1722,14 +1784,42 @@ function requestTvHtml5EmbedStreamingData(videoId, sts) {
 //#region Page Extraction
 function getInitialData(html, useAuth = false) {
 	const clientContext = getClientContext(useAuth);
+
+	//TODO: Fix regex instead of this temporary workaround.
+	/*
+	const startIndex = html.indexOf("var ytInitialData = ");
+	const endIndex = html.indexOf(";</script>", startIndex);
+	if(startIndex > 0 && endIndex > 0) {
+	    const raw = html.substring(startIndex + 20, endIndex);
+	    const initialDataRaw = raw.startsWith("'") && raw.endsWith("'") ?
+            decodeHexEncodedString(raw.substring(1, raw.length - 1))
+                //TODO: Find proper decoding strat
+                .replaceAll("\\\\\"", "\\\"") :
+            raw;
+		let initialData = null;
+		try{
+			initialData = JSON.parse(initialDataRaw);
+		}
+		catch(ex) {
+			console.log("Failed to parse initial data: ", initialDataRaw);
+			throw ex;
+		}
+		if(clientContext?.INNERTUBE_CONTEXT && !clientContext.INNERTUBE_CONTEXT.client.visitorData &&
+			initialData.responseContext?.webResponseContextExtensionData?.ytConfigData?.visitorData) {
+				clientContext.INNERTUBE_CONTEXT.client.visitorData = initialData.responseContext?.webResponseContextExtensionData?.ytConfigData?.visitorData
+			log("Found new visitor (auth) data: " + clientContext.INNERTUBE_CONTEXT.client.visitorData);
+		}
+		return initialData;
+	}*/
+
 	const match = html.match(REGEX_INITIAL_DATA);
 	if(match) {
-		const initialDataRaw = match[1].startsWith("'") && match[1].endsWith("'") ? 
+		const initialDataRaw = match[1].startsWith("'") && match[1].endsWith("'") ?
 			decodeHexEncodedString(match[1].substring(1, match[1].length - 1))
 				//TODO: Find proper decoding strat
 				.replaceAll("\\\\\"", "\\\"") : 
 			match[1];
-		let initialData = "null";
+		let initialData = null;
 		try{
 			initialData = JSON.parse(initialDataRaw);
 		}
@@ -1746,6 +1836,9 @@ function getInitialData(html, useAuth = false) {
 		}
 		return initialData;
 	}
+	//if(initialData == null)
+	//    log(html);
+
 	return null;
 }
 function getInitialPlayerData(html) {
@@ -1876,10 +1969,10 @@ function extractSearch_SearchResults(data, contextData) {
  * @returns {PlatformChannel}
  */
 function extractChannel_PlatformChannel(initialData, sourceUrl = null) {
-	const headerRenderer = initialData.header?.c4TabbedHeaderRenderer;
+	const headerRenderer = initialData?.header?.c4TabbedHeaderRenderer;
 	if(!headerRenderer) {
 		log("Missing header renderer in structure: (" + sourceUrl + ")\n" + JSON.stringify(initialData, null, "   "));
-		throw new ScriptException("No header renderer");
+		throw new ScriptException("No header renderer for " + sourceUrl);
 	}
 
 
@@ -2247,7 +2340,7 @@ function extractTwoColumnWatchNextResultContents_CommentsPager(contextUrl, conte
 	}
 	if(!commentsToken)
 		return new CommentPager([], false);
-	return requestCommentPager(contextUrl, commentsToken);
+	return requestCommentPager(contextUrl, commentsToken) ??  new CommentPager([], false);
 }
 function requestCommentPager(contextUrl, continuationToken) {
 	const data = requestNext({
