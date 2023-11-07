@@ -182,7 +182,7 @@ dependencies {
     implementation 'com.arthenica:ffmpeg-kit-full:5.1'
     implementation 'org.jetbrains.kotlin:kotlin-reflect:1.7.20'
     implementation 'com.github.dhaval2404:imagepicker:2.1'
-    implementation 'com.google.zxing:core:3.4.1'
+    implementation 'com.google.zxing:core:3.5.2'
     implementation 'com.journeyapps:zxing-android-embedded:4.2.0'
     implementation 'com.caverock:androidsvg-aar:1.4'
 
