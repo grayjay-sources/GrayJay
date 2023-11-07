@@ -187,7 +187,7 @@ dependencies {
     implementation 'com.caverock:androidsvg-aar:1.4'
 
     //Protobuf
-    implementation 'com.google.protobuf:protobuf-javalite:3.22.3'
+    implementation 'com.google.protobuf:protobuf-javalite:3.25.0'
 
     implementation 'com.polycentric.core:app:1.0'
     implementation 'com.futo.futopay:app:1.0'
