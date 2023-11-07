@@ -42,6 +42,13 @@
 		"default": "false"
 	  },
 	  {
+		"variable": "sponsorBlock",
+		"name": "Sponsorblock",
+		"description": "Use Sponsorblock to skip unwanted parts of videos",
+		"type": "Boolean",
+		"default": "false"
+	  },
+	  {
 		"variable": "authChannels",
 		"name": "Use Login for Channels",
 		"description": "Use authenticated client for channel (videos) requests. (eg. for member videos)",

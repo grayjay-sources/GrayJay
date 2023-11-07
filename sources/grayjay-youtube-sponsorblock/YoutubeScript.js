@@ -24,6 +24,7 @@ const URL_WATCHTIME = "https://www.youtube.com/api/stats/watchtime";
 
 const URL_PLAYER = "https://youtubei.googleapis.com/youtubei/v1/player";
 
+const URL_SPONSORBLOCK = "https://sponsor.ajay.app/api/skipSegments?videoID=";
 const URL_YOUTUBE_DISLIKES = "https://returnyoutubedislikeapi.com/votes?videoId=";
 
 //Newest to oldest
@@ -31,7 +32,7 @@ const CIPHER_TEST_HASHES = ["4eae42b1", "f98908d1", "0e6aaa83", "d0936ad4", "8e8
 const CIPHER_TEST_PREFIX = "/s/player/";
 const CIPHER_TEST_SUFFIX = "/player_ias.vflset/en_US/base.js";
 
-const PLATFORM = "YouTube";
+const PLATFORM = "YouTube (SponsorBlock)";
 const PLATFORM_CLAIMTYPE = 2;
 
 const BROWSE_TRENDING = "FEtrending";
@@ -325,8 +326,13 @@ source.getContentDetails = (url, useAuth) => {
 
 	const batch = http.batch().GET(url, headersUsed, useLogin);
 		
-	if(videoId && _settings["youtubeDislikes"])
-		batch.GET(URL_YOUTUBE_DISLIKES + videoId, {}, false);
+	if(videoId) {
+		if (_settings["youtubeDislikes"])
+			batch.GET(URL_YOUTUBE_DISLIKES + videoId, {}, false);
+		if (_settings["sponsorBlock"])
+			batch.GET(URL_SPONSORBLOCK + videoId, {}, false);
+	}
+
 	const resps = batch.execute();
 
     throwIfCaptcha(resps[0]);
@@ -422,7 +428,22 @@ source.getContentDetails = (url, useAuth) => {
         catch(ex) {
             console.log("Failed to fetch Youtube Dislikes", ex);
         }
+		if (resps.length > 2) {
+			try {
+				const SponsorBlockResponse = resps[2]
+				if(SponsorBlockResponse.isOk) {
+					const sponsorBlockSpots = JSON.parse(SponsorBlockResponse.body);
+					if(IS_TESTING)
+						console.log("SponsorBlock Info", sponsorBlockSpots);
+					videoDetails.sponsorSpots = sponsorBlockSpots;
+				}
+			}
+			catch(ex) {
+				console.log("Failed to fetch SponsorBlock Info", ex);
+			}
+		}
 	}
+
 
 	const finalResult = videoDetails;
 	finalResult.__initialData = initialData;
