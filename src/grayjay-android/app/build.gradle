@@ -172,7 +172,7 @@ dependencies {
     implementation 'com.google.android.exoplayer:exoplayer-smoothstreaming:2.18.7'
     implementation 'com.google.android.exoplayer:exoplayer-transformer:2.18.7'
     implementation 'androidx.navigation:navigation-fragment-ktx:2.5.3'
-    implementation 'androidx.navigation:navigation-ui-ktx:2.5.3'
+    implementation 'androidx.navigation:navigation-ui-ktx:2.7.5'
 
     //Other
     implementation 'org.jmdns:jmdns:3.5.1'
