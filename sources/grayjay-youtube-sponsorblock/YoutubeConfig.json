@@ -10,8 +10,8 @@
 	"version": 139,
 	"iconUrl": "./youtube.png",
 	"id": "35ae969a-a7db-11ed-afa1-0242ac120a05",
-	"scriptSignature": "GV3vv71PHgEw77+9Fe+/ve+/vXrvv71xQRl977+977+9Yu+/ve+/ve+/vQ==",
-	"scriptPublicKey": "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA1U3PYazMAZr0WGfT/RYx Y5MZXaUhlvMDkz/oBE5baOSDqMZcthK27Hbu5ubSmFXh3PqpH3qhDsezDyHtV9sC CHMuHEdkKMkbP67FBfGxSfVa8uu5ZJdw5ixYKrP7XhavZ6cMmyWNmSFnZo3vo8pM HhAcUekXVwq/Yko+TV27015Btsyrp80j+HqmfPhVSvRXzimr3pU9ZPLu1Bc/KyYe 36i3xA+Ux9N8IhCMaEd8tC+91A+tB6PnsZcSdlzif5b9NdsY4pADLzNRpbmSD3nG 9z0b8YPys3i73QDieMDazQgWVucpaXbFfyyG8VhT0O2+58aATfzkMZfPdVU4xSRz tv/bEBqJUjHEecPhl4XgUHDRBENpeQA0MhihOFakZJcq/KMXauvBJVywibQh5QTC lQSNlMiTIEpL4b/HLO9DlyhaMSxsdM+f9iVE42Tr8BnTA49GeRtyBpt1KiUfoPlI DkHgt6JaVHy9oNtA91naSw/BGf8dlO7ISXhQyQ6nImpxAgMBAAE=",
+	"scriptSignature": "<ommitted>",
+	"scriptPublicKey": "<ommitted>",
 	"packages": [
 	  "Http",
 	  "Utilities"
