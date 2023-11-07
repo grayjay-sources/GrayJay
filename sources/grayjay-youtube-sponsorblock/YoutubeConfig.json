@@ -10,8 +10,6 @@
 	"version": 139,
 	"iconUrl": "./youtube.png",
 	"id": "35ae969a-a7db-11ed-afa1-0242ac120003",
-	"scriptSignature": "",
-	"scriptPublicKey": "",
 	"packages": [
 	  "Http",
 	  "Utilities"
