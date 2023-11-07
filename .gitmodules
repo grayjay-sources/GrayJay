@@ -1,0 +1,44 @@
+[submodule "sources/pornhub-grayjay-plug"]
+	path = sources/pornhub-grayjay-plug
+	url = https://github.com/Shadow1992-ux/pornhub-grayjay-plug
+	branch = main
+[submodule "sources/GodResourcePluginUnoffical"]
+	path = sources/GodResourcePluginUnoffical
+	url = https://github.com/skytunnel/GodResourcePluginUnoffical
+	branch = main
+[submodule "sources/grayjay-sample"]
+	path = sources/grayjay-sample
+	url = https://github.com/Viddla/grayjay-sample
+	branch = master
+[submodule "sources/Mediathek"]
+	path = sources/Mediathek
+	url = https://github.com/Windowsfreak/Mediathek
+	branch = main
+[submodule "sources/grayjay-twitch"]
+	path = sources/grayjay-twitch
+	url = https://github.com/Viddla/grayjay-twitch
+	branch = master
+[submodule "sources/grayjay-odysee"]
+	path = sources/grayjay-odysee
+	url = https://github.com/Viddla/grayjay-odysee
+	branch = master
+[submodule "sources/grayjay-youtube"]
+	path = sources/grayjay-youtube
+	url = https://github.com/Viddla/grayjay-youtube
+	branch = captcha
+[submodule "sources/grayjay-peertube"]
+	path = sources/grayjay-peertube
+	url = https://github.com/Viddla/grayjay-peertube
+	branch = master
+[submodule "sources/grayjay_wienat_videos"]
+	path = sources/grayjay_wienat_videos
+	url = https://github.com/Matti-Koopa/grayjay_wienat_videos
+	branch = master
+[submodule "sources/grayjay-media.ccc-plugin"]
+	path = sources/grayjay-media.ccc-plugin
+	url = https://github.com/Alex-451/grayjay-media.ccc-plugin
+	branch = main
+[submodule "src/grayjay-android"]
+	path = src/grayjay-android
+	url = https://github.com/futo-org/grayjay-android
+	branch = master

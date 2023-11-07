@@ -1,0 +1,25 @@
+{
+	"name": "Wien.gv.at Videos",
+	"description": "Videos der Stadt Wien",
+	"author": "Matthias Porges",
+	"authorUrl": "https://nether.at",
+	
+	"sourceUrl": "https://github.com/Matti-Koopa/grayjay_wienat_videos/releases/download/current/WienAtVideosConfig.json",
+	"repositoryUrl": "https://github.com/Matti-Koopa/grayjay_wienat_videos/",
+	"scriptUrl": "./WienAtVideosScript.js",
+	"version": 1,
+	
+	"iconUrl": "./Stadt_Wien_Wappen.png",
+	"id": "33713163-e1c2-46ba-b65e-3f1f08b82f16",
+	
+	"scriptSignature": "ph0JkQ9xzV4rCy5R6OcptMuFZGoqj6cn9P/u638EehwFsD0UNEMxKNManuqSXokU+E4G6HhvTF+1bg1hFhYc6vvQan4wYWpUDDxfPsYdlFJovsszLMdSXAwd2u8z1sPDWpVmK/onlO8AQhcWzm5jIyMo5HwCAo6fqa0J1rPwc4a4YhMSaFqTEctgqEluPlFBxcoqMqjp4569Ug3XmgpqXnyJ6DAIL953yNYULv7omj7rk8zpLhxT3eZOz3853MEvZzqrvUsdiB9m9aI00WpBFKXPH2IyEHM/kzSKY6W+MWysWt+KZ4tPX83VD3uT37T1pynIk7FUBZ2mZXjCHKrFWw==",
+	"scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxoV9LKqeVZ+7aGirjUrMh0SXhu+qnWSCev4VQCEmjO0BR2sIkJGmflCHQBtt49qrQsBPiu+dWWGTiFPwg9T5E7+rLQ9ccOHWNKOX14o2+ZO+cad6p4xSzIcOHWCDNw1IbTLDYNa9E/cpp/Df6fIEzDqq5Ht8cus1vzmUKpRK4xkF/E2lTXb+i91a7UMEEv+VM63HmmHJnxrB69kbgmk7MqQWacAgE9Fp2y1MxYC5SLh0gZMH6OrLm4GjIPRqf/OLS7EqqfV9BhnstMCQWz2hsk+SUSvxQ34IkHqUN3tMNloamDx+/feFbUdh81yhI1kBV7Omem9b0XwMiu6SiCG6cQIDAQAB",
+	"packages": ["Http", "DOMParser"],
+	
+	"allowEval": false,
+	"allowUrls": [
+		"www.wien.gv.at",
+		"ms01.w24.at",
+		"ms02.w24.at"
+	]
+}
