@@ -104,7 +104,7 @@
 	path = sources/Tsunami014-grayjay_plugins
 	url = https://github.com/Tsunami014/My-Grayjay-plugin
 	branch = main
-[submodule "bluscream-pietsmietde"]
-	path = bluscream-pietsmietde
+[submodule "sources/bluscream-pietsmietde"]
+	path = sources/bluscream-pietsmietde
 	url = https://github.com/Bluscream/grayjay-source-pietsmietde/
 	branch = master
