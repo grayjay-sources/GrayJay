@@ -4,7 +4,7 @@
 	"author": "FUTO",
 	"authorUrl": "https://futo.org",
 	
-	"sourceUrl": "https://plugins.grayjay.app/Sample/SampleConfig.json",
+	"sourceUrl": "https://github.com/Bluscream/GrayJay/raw/master/sources/grayjay-sample/SampleConfig.json",
 	"repositoryUrl": "https://futo.org",
 	"scriptUrl": "./SampleScript.js",
 	"version": 23,
