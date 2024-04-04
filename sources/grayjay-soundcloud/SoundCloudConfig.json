@@ -1,28 +1,28 @@
 {
-	"name": "SoundCloud",
-	"description": "One of the biggest music distribution platforms, Privately owned",
-	"author": "FUTO",
-	"platformUrl": "https://soundcloud.com",
-	"authorUrl": "https://futo.org",
-	"sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
-	"repositoryUrl": "https://futo.org",
-	"scriptUrl": "./SoundcloudScript.js",
-	"version": 13,
-	"iconUrl": "./soundcloud.png",
-	"id": "5fb74e28-2fba-406a-9418-38af04f63c08",
-	"scriptSignature": "qS7hkOL2/LoMqEMzctmA/GqGAvlUnScAy/+vvVLCHL+AIoYyiN1b2acbcH3Xk5K7W/n0icPCHGugJohvNbmw0XYwQbBAQjuIeyfhy6bH06UZR2BkQbCWKHaE5GEXb9OcenKCJEjxsMczH8d8uIgnTaSKKVy9eD7Df9wRutYy95Q/HDl4gcZtrjiQBxEfd34VbT+yr962M/b0xdtZv4+NN101qP/srBYUYAtPoiAutG6GRbMi77rXY5TzvrIEFGpKdLEeRoppboX9D4+V1KtLmkfXKMjj8glflI/d/ZRsOYapFVrcjX47qFqlly6D7RCoBp2C6CWCswRe6Ln8745nDg==",
-	"scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsoFJU4AReDyUnSQI9A99UjLCwkY8OH+1o8cdtf2EjSb+fO2qmP8MGMTAvfvgmq5d2QBJE2XHRkRO3JKcTlcc1j0WlOlU8P9W272DYCeX6oYaavpKNqGKoGEuodp9wtiyNwyH46++JfpU/uIUacZbZKkHv9gIGchmNvpKYZQjFd/8pUqXGpcXZP54tGSC9PLcY+5TozZThK7Oy1+3YEf1bZ44UinRYYATbLk/wNuAfsupvlt6nxZOcJhABhdo9V+gY0FE6Ayg5+1cd1noWhnRtLF+sPdEr3z8Nt15JEK5a/524t25FMhwz8yKxlGW5qW3QLJHSUgLQncL6a1zlZ1s8QIDAQAB",
-	"packages": [
-	  "Http"
-	],
-	"allowEval": false,
-	"allowUrls": [
-	  "api-v2.soundcloud.com",
-	  "soundcloud.com",
-	  "a-v2.sndcdn.com",
-	  "m.soundcloud.com"
-	],
-	"supportedClaimTypes": [
-	  17
-	]
-  }
+  "name": "SoundCloud",
+  "description": "One of the biggest music distribution platforms, Privately owned",
+  "author": "FUTO",
+  "platformUrl": "https://soundcloud.com",
+  "authorUrl": "https://futo.org",
+  "sourceUrl": "https://plugins.grayjay.app/Soundcloud/SoundcloudConfig.json",
+  "repositoryUrl": "https://futo.org",
+  "scriptUrl": "./SoundcloudScript.js",
+  "version": 13,
+  "iconUrl": "./soundcloud.png",
+  "id": "5fb74e28-2fba-406a-9418-38af04f63c08",
+  "scriptSignature": "qS7hkOL2/LoMqEMzctmA/GqGAvlUnScAy/+vvVLCHL+AIoYyiN1b2acbcH3Xk5K7W/n0icPCHGugJohvNbmw0XYwQbBAQjuIeyfhy6bH06UZR2BkQbCWKHaE5GEXb9OcenKCJEjxsMczH8d8uIgnTaSKKVy9eD7Df9wRutYy95Q/HDl4gcZtrjiQBxEfd34VbT+yr962M/b0xdtZv4+NN101qP/srBYUYAtPoiAutG6GRbMi77rXY5TzvrIEFGpKdLEeRoppboX9D4+V1KtLmkfXKMjj8glflI/d/ZRsOYapFVrcjX47qFqlly6D7RCoBp2C6CWCswRe6Ln8745nDg==",
+  "scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsoFJU4AReDyUnSQI9A99UjLCwkY8OH+1o8cdtf2EjSb+fO2qmP8MGMTAvfvgmq5d2QBJE2XHRkRO3JKcTlcc1j0WlOlU8P9W272DYCeX6oYaavpKNqGKoGEuodp9wtiyNwyH46++JfpU/uIUacZbZKkHv9gIGchmNvpKYZQjFd/8pUqXGpcXZP54tGSC9PLcY+5TozZThK7Oy1+3YEf1bZ44UinRYYATbLk/wNuAfsupvlt6nxZOcJhABhdo9V+gY0FE6Ayg5+1cd1noWhnRtLF+sPdEr3z8Nt15JEK5a/524t25FMhwz8yKxlGW5qW3QLJHSUgLQncL6a1zlZ1s8QIDAQAB",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowUrls": [
+    "api-v2.soundcloud.com",
+    "soundcloud.com",
+    "a-v2.sndcdn.com",
+    "m.soundcloud.com"
+  ],
+  "supportedClaimTypes": [
+    17
+  ]
+}
