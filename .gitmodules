@@ -1,3 +1,53 @@
+[submodule "src/grayjay-android"]
+	path = src/grayjay-android
+	url = https://github.com/futo-org/grayjay-android
+	branch = master
+
+[submodule "sources/grayjay-sample"]
+	path = sources/grayjay-sample
+	url = https://gitlab.futo.org/videostreaming/plugins/sample
+	branch = master
+[submodule "sources/grayjay-youtube"]
+	path = sources/grayjay-youtube
+	url = https://gitlab.futo.org/videostreaming/plugins/youtube
+	branch = master
+[submodule "sources/grayjay-twitch"]
+	path = sources/grayjay-twitch
+	url = https://gitlab.futo.org/videostreaming/plugins/twitch
+	branch = master
+[submodule "sources/grayjay-odysee"]
+	path = sources/grayjay-odysee
+	url = https://gitlab.futo.org/videostreaming/plugins/odysee
+	branch = master
+[submodule "sources/grayjay-peertube"]
+	path = sources/grayjay-peertube
+	url = https://gitlab.futo.org/videostreaming/plugins/peertube
+	branch = master
+[submodule "sources/grayjay-kick"]
+	path = sources/grayjay-kick
+	url = https://gitlab.futo.org/videostreaming/plugins/kick
+	branch = master
+[submodule "sources/grayjay-nebula"]
+	path = sources/grayjay-nebula
+	url = https://gitlab.futo.org/videostreaming/plugins/nebula
+	branch = master
+[submodule "sources/grayjay-niconico"]
+	path = sources/grayjay-niconico
+	url = https://gitlab.futo.org/videostreaming/plugins/niconico
+	branch = master
+[submodule "sources/grayjay-patreon"]
+	path = sources/grayjay-patreon
+	url = https://gitlab.futo.org/videostreaming/plugins/patreon
+	branch = master
+[submodule "sources/grayjay-rumble"]
+	path = sources/grayjay-rumble
+	url = https://gitlab.futo.org/videostreaming/plugins/rumble
+	branch = master
+[submodule "sources/grayjay-soundcloud"]
+	path = sources/grayjay-soundcloud
+	url = https://gitlab.futo.org/videostreaming/plugins/soundcloud
+	branch = master
+
 [submodule "sources/pornhub-grayjay-plug"]
 	path = sources/pornhub-grayjay-plug
 	url = https://github.com/Shadow1992-ux/pornhub-grayjay-plug
@@ -14,22 +64,6 @@
 	path = sources/Mediathek
 	url = https://github.com/Windowsfreak/Mediathek
 	branch = main
-[submodule "sources/grayjay-twitch"]
-	path = sources/grayjay-twitch
-	url = https://github.com/Viddla/grayjay-twitch
-	branch = master
-[submodule "sources/grayjay-odysee"]
-	path = sources/grayjay-odysee
-	url = https://github.com/Viddla/grayjay-odysee
-	branch = master
-[submodule "sources/grayjay-youtube"]
-	path = sources/grayjay-youtube
-	url = https://github.com/Viddla/grayjay-youtube
-	branch = captcha
-[submodule "sources/grayjay-peertube"]
-	path = sources/grayjay-peertube
-	url = https://github.com/Viddla/grayjay-peertube
-	branch = master
 [submodule "sources/grayjay_wienat_videos"]
 	path = sources/grayjay_wienat_videos
 	url = https://github.com/Matti-Koopa/grayjay_wienat_videos
@@ -38,10 +72,6 @@
 	path = sources/grayjay-media.ccc-plugin
 	url = https://github.com/Alex-451/grayjay-media.ccc-plugin
 	branch = main
-[submodule "src/grayjay-android"]
-	path = src/grayjay-android
-	url = https://github.com/futo-org/grayjay-android
-	branch = master
 [submodule "sources/paaspaas00-pornhub"]
 	path = sources/paaspaas00-pornhub
 	url = https://github.com/paaspaas00/pornhubGrayjay
