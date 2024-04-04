@@ -23,7 +23,7 @@ def make_request(url):
     return request.urlopen(req)
 
 def download_file(url, save_path):
-    print(f"Downloading {url} to {save_path}")
+    logging.info(f"Downloading {url} to {save_path}")
     try:
         # response: _UrlopenRet
         with make_request(url) as response:
@@ -32,9 +32,9 @@ def download_file(url, save_path):
                 raise Exception(f"Failed to download file. Status code: {response.status}")
             with open(save_path, 'wb') as file:
                 file.write(file_content)
-        print(f"File downloaded successfully to {save_path}")
+        logging.info(f"File downloaded successfully to {save_path}")
     except Exception as e:
-        print(f"Failed to download file. Error: {e}")
+        logging.info(f"Failed to download file. Error: {e}")
 
 def get_parent_url(url: ParseResult):
     return url.path.rsplit('/', 1)[0] # [:-1]
@@ -74,13 +74,13 @@ def fix_url(url: str):
 def try_urls(urls: list[ParseResult]):
     for url in urls:
         url = urlunparse(url)
-        print(f"Trying url {url}")
+        logging.info(f"Trying url {url}")
         try:
             with make_request(url) as response:
                 if response.status != 200: continue
                 return url, response
         except Exception as e:
-            print(f"Failed to request {url}. Error: {e}")
+            logging.info(f"Failed to request {url}. Error: {e}")
 
 def find_urls(content: dict[str,Any]) -> list[ParseResult]:
     ret = set()
@@ -91,9 +91,9 @@ def find_urls(content: dict[str,Any]) -> list[ParseResult]:
             domain = parsed_url.netloc.lower()
             path_components = parsed_url.path.split('/')
             if "." in path_components[-1]:
-                print("possible file url", url)
+                logging.info("possible file url", url)
             repo_url = parse_repo(parsed_url, content)
-            if repo_url: print("got repo url:",repo_url)
+            if repo_url: logging.info("got repo url:",repo_url)
             ret.add(parsed_url)
     return ret
 
@@ -103,21 +103,21 @@ def updateSource(path: Path, js_files: list[Path]):
 
     repo_url = content.get("repositoryUrl")
     json_url = content.get("sourceUrl")
-    if not json_url: raise ValueError(f"sourceUrl missing from {path}")
+    if not json_url: logging.error(f"sourceUrl missing from {path}"); return
     # possible_urls = find_urls(content)
-    # print(f"possible_urls: {pformat(possible_urls)}")
+    # logging.info(f"possible_urls: {pformat(possible_urls)}")
     # url, response = try_urls(possible_urls) or None, None
-    # print(f"tried_urls: {pformat([url, response])}")
+    # logging.info(f"tried_urls: {pformat([url, response])}")
     script_url = content.get('scriptUrl')
-    if not script_url: raise ValueError(f"scriptUrl missing from {path}")
+    if not script_url: logging.error(f"scriptUrl missing from {path}"); return
     # if script_url.startswith('./'): script_url = base_url +'/'.join(script_url[2:])
     # if repo_url: parsed_repo_url = parse_repo(repo_url, content)
-    # print(parsed_repo_url)
+    # logging.info(parsed_repo_url)
     download_file(json_url, path)
-    # print(json_url)
+    # logging.info(json_url)
     # parsed_source_url = json_url.rsplit('/', 1)
     # new_url = f"https://{parsed_source_url}/{script_url}"
-    # print(new_url)
+    # logging.info(new_url)
 
 # Iterate over all subdirectories in the root directory
 for subdir, dirs, files in os.walk(root_dir):
@@ -137,8 +137,6 @@ for subdir, dirs, files in os.walk(root_dir):
         updateSource(first_json_file, js_files)
         
         logging.debug(f"Generated URL: {url}")
-
-        continue
 
         # Generate the QR code
         qr = qrcode.QRCode(
