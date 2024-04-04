@@ -42,3 +42,35 @@
 	path = src/grayjay-android
 	url = https://github.com/futo-org/grayjay-android
 	branch = master
+[submodule "sources/paaspaas00-pornhub"]
+	path = sources/paaspaas00-pornhub
+	url = https://github.com/paaspaas00/pornhubGrayjay
+	branch = main
+[submodule "sources/DeltaEvo-Crunchyroll"]
+	path = sources/DeltaEvo-Crunchyroll
+	url = https://github.com/DeltaEvo/GrayjayCrunchyroll
+	branch = main
+[submodule "sources/dw5-Vanillo"]
+	path = sources/dw5-Vanillo
+	url = https://github.com/dw5/grayjay-Vanillo
+	branch = master
+[submodule "sources/PiotrekB416-CDA"]
+	path = sources/PiotrekB416-CDA
+	url = https://github.com/PiotrekB416/GrayJay-CDA
+	branch = main
+[submodule "sources/twosky200-grayjay_plugins"]
+	path = sources/twosky200-grayjay_plugins
+	url = https://github.com/twosky2000/grayjay_plugins
+	branch = main
+[submodule "sources/netux-youtube-dearrow"]
+	path = sources/netux-youtube-dearrow
+	url = https://github.com/netux/grayjay-source-youtube
+	branch = with-dearrow
+[submodule "sources/pantsufan-grayspon"]
+	path = sources/pantsufan-grayspon
+	url = https://github.com/pantsufan/grayspon
+	branch = main
+[submodule "sources/Tsunami014-grayjay_plugins"]
+	path = sources/Tsunami014-grayjay_plugins
+	url = https://github.com/Tsunami014/My-Grayjay-plugin
+	branch = main
