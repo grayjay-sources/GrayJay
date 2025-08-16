@@ -1,12 +1,12 @@
 package com.futo.platformplayer.api.http.server
 
-import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.api.http.ManagedHttpClient
 import com.futo.platformplayer.api.http.server.exceptions.EmptyRequestException
-import com.futo.platformplayer.api.http.server.handlers.HttpFuntionHandler
+import com.futo.platformplayer.api.http.server.handlers.HttpFunctionHandler
 import com.futo.platformplayer.api.http.server.handlers.HttpHandler
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import com.futo.platformplayer.api.http.server.handlers.HttpOptionsAllowHandler
+import com.futo.platformplayer.logging.Logger
+import java.io.BufferedInputStream
 import java.io.OutputStream
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -14,7 +14,7 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.stream.IntStream.range
@@ -29,7 +29,8 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
     var port = 0
             private set;
 
-    private val _handlers = mutableListOf<HttpHandler>();
+    private val _handlers = hashMapOf<String, HashMap<String, HttpHandler>>()
+    private val _headHandlers = hashMapOf<String, HttpHandler>()
     private var _workerPool: ExecutorService? = null;
 
     @Synchronized
@@ -76,12 +77,12 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
 
     private fun handleClientRequest(socket: Socket) {
         _workerPool?.submit {
-            val requestReader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val requestStream = BufferedInputStream(socket.getInputStream());
             val responseStream = socket.getOutputStream();
 
             val requestId = UUID.randomUUID().toString().substring(0, 5);
             try {
-                keepAliveLoop(requestReader, responseStream, requestId) { req ->
+                keepAliveLoop(requestStream, responseStream, requestId) { req ->
                     req.use { httpContext ->
                         if(!httpContext.path.startsWith("/plugin/"))
                             Logger.i(TAG, "[${req.id}] ${httpContext.method}: ${httpContext.path}")
@@ -107,7 +108,7 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
                 Logger.e(TAG, "Failed to handle client request.", e);
             }
             finally {
-                requestReader.close();
+                requestStream.close();
                 responseStream.close();
             }
         };
@@ -115,36 +116,82 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
 
     fun getHandler(method: String, path: String) : HttpHandler? {
         synchronized(_handlers) {
-            //TODO: Support regex paths?
-            if(method == "HEAD")
-                return _handlers.firstOrNull { it.path == path && (it.allowHEAD || it.method == "HEAD") }
-            return _handlers.firstOrNull { it.method == method && it.path == path };
+            if (method == "HEAD") {
+                return _headHandlers[path]
+            }
+
+            val handlerMap = _handlers[method] ?: return null
+            return handlerMap[path]
         }
     }
     fun addHandler(handler: HttpHandler, withHEAD: Boolean = false) : HttpHandler {
         synchronized(_handlers) {
-            _handlers.add(handler);
             handler.allowHEAD = withHEAD;
+
+            var handlerMap: HashMap<String, HttpHandler>? = _handlers[handler.method];
+            if (handlerMap == null) {
+                handlerMap = hashMapOf()
+                _handlers[handler.method] = handlerMap
+            }
+
+            handlerMap[handler.path] = handler;
+            if (handler.allowHEAD || handler.method == "HEAD") {
+                _headHandlers[handler.path] = handler
+            }
         }
         return handler;
     }
+
+    fun addHandlerWithAllowAllOptions(handler: HttpHandler, withHEAD: Boolean = false) : HttpHandler {
+        val allowedMethods = arrayListOf(handler.method, "OPTIONS")
+        if (withHEAD) {
+            allowedMethods.add("HEAD")
+        }
+
+        val tag = handler.tag
+        if (tag != null) {
+            addHandler(HttpOptionsAllowHandler(handler.path, allowedMethods).withTag(tag))
+        } else {
+            addHandler(HttpOptionsAllowHandler(handler.path, allowedMethods))
+        }
+
+        return addHandler(handler, withHEAD)
+    }
+
     fun removeHandler(method: String, path: String) {
         synchronized(_handlers) {
-            val handler = getHandler(method, path);
-            if(handler != null)
-                _handlers.remove(handler);
+            val handlerMap = _handlers[method] ?: return
+            val handler = handlerMap.remove(path) ?: return
+            if (method == "HEAD" || handler.allowHEAD) {
+                _headHandlers.remove(path)
+            }
         }
     }
     fun removeAllHandlers(tag: String? = null) {
         synchronized(_handlers) {
             if(tag == null)
                 _handlers.clear();
-            else
-                _handlers.removeIf { it.tag == tag };
+            else {
+                for (pair in _handlers) {
+                    val toRemove = ArrayList<String>()
+                    for (innerPair in pair.value) {
+                        if (innerPair.value.tag == tag) {
+                            toRemove.add(innerPair.key)
+
+                            if (pair.key == "HEAD" || innerPair.value.allowHEAD) {
+                                _headHandlers.remove(innerPair.key)
+                            }
+                        }
+                    }
+
+                    for (x in toRemove)
+                        pair.value.remove(x)
+                }
+            }
         }
     }
     fun addBridgeHandlers(obj: Any, tag: String? = null) {
-        val tagToUse = tag ?: obj.javaClass.name;
+        //val tagToUse = tag ?: obj.javaClass.name;
         val getMethods = obj::class.java.declaredMethods
             .filter { it.getAnnotation(HttpGET::class.java) != null }
             .map { Pair<Method, HttpGET>(it, it.getAnnotation(HttpGET::class.java)!!) }
@@ -161,20 +208,20 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
 
         for(getMethod in getMethods)
             if(getMethod.first.parameterTypes.firstOrNull() == HttpContext::class.java && getMethod.first.parameterCount == 1)
-                addHandler(HttpFuntionHandler("GET", getMethod.second.path) { getMethod.first.invoke(obj, it) }).apply {
+                addHandler(HttpFunctionHandler("GET", getMethod.second.path) { getMethod.first.invoke(obj, it) }).apply {
                     if(!getMethod.second.contentType.isEmpty())
                         this.withContentType(getMethod.second.contentType);
-                }.withContentType(getMethod.second.contentType ?: "");
+                }.withContentType(getMethod.second.contentType);
         for(postMethod in postMethods)
             if(postMethod.first.parameterTypes.firstOrNull() == HttpContext::class.java && postMethod.first.parameterCount == 1)
-                addHandler(HttpFuntionHandler("POST", postMethod.second.path) { postMethod.first.invoke(obj, it) }).apply {
+                addHandler(HttpFunctionHandler("POST", postMethod.second.path) { postMethod.first.invoke(obj, it) }).apply {
                     if(!postMethod.second.contentType.isEmpty())
                         this.withContentType(postMethod.second.contentType);
-                }.withContentType(postMethod.second.contentType ?: "");
+                }.withContentType(postMethod.second.contentType);
 
         for(getField in getFields) {
             getField.first.isAccessible = true;
-            addHandler(HttpFuntionHandler("GET", getField.second.path) {
+            addHandler(HttpFunctionHandler("GET", getField.second.path) {
                 val value = getField.first.get(obj) as String?;
                 if(value != null) {
                     val headers = HttpHeaders(
@@ -184,13 +231,13 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
                 }
                 else
                     it.respondCode(204);
-            }).withContentType(getField.second.contentType ?: "");
+            }).withContentType(getField.second.contentType);
         }
     }
 
-    private fun keepAliveLoop(requestReader: BufferedReader, responseStream: OutputStream, requestId: String, handler: (HttpContext)->Unit) {
+    private fun keepAliveLoop(requestReader: BufferedInputStream, responseStream: OutputStream, requestId: String, handler: (HttpContext)->Unit) {
         val stopCount = _stopCount;
-        var keepAlive = false;
+        var keepAlive: Boolean;
         var requestsMax = 0;
         var requestsTotal = 0;
         do {
@@ -240,11 +287,13 @@ class ManagedHttpServer(private val _requestedPort: Int = 0) {
             for (intf in NetworkInterface.getNetworkInterfaces()) {
                 for (addr in intf.inetAddresses) {
                     if (!addr.isLoopbackAddress) {
-                        val ipString: String = addr.hostAddress;
-                        val isIPv4 = ipString.indexOf(':') < 0;
-                        if (!isIPv4)
-                            continue;
-                        addresses.add(addr);
+                        val ipString: String = addr.hostAddress ?: continue
+                        val isIPv4 = ipString.indexOf(':') < 0
+                        if (!isIPv4) {
+                            continue
+                        }
+
+                        addresses.add(addr)
                     }
                 }
             }

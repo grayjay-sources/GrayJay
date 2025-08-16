@@ -8,6 +8,7 @@ import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import com.futo.platformplayer.R
 import com.futo.platformplayer.constructs.Event2
+import com.futo.platformplayer.constructs.Event3
 import com.futo.platformplayer.dp
 import com.futo.platformplayer.views.buttons.BigButton
 import java.lang.reflect.Field
@@ -25,6 +26,12 @@ class ButtonField : BigButton, IField {
 
     override var reference: Any? = null;
 
+    override val value: Any? = null;
+
+    override val searchContent: String?
+        get() = "$title $description";
+
+
     override val obj : Any? get() {
         if(this._obj == null)
             throw java.lang.IllegalStateException("Can only be called if fromField is used");
@@ -34,10 +41,12 @@ class ButtonField : BigButton, IField {
         return null;
     };
 
+    override var isAdvanced: Boolean = false;
+
     //private val _title : TextView;
     //private val _subtitle : TextView;
 
-    override val onChanged = Event2<IField, Any>();
+    override val onChanged = Event3<IField, Any, Any>();
 
     constructor(context : Context, attrs : AttributeSet? = null) : super(context, attrs){
         //inflate(context, R.layout.field_button, this);
@@ -50,6 +59,8 @@ class ButtonField : BigButton, IField {
         };
 
         super.onClick.subscribe {
+            if(!isEnabled)
+                return@subscribe;
             if(_method?.parameterCount == 1)
                 _method?.invoke(_obj, context);
             else if(_method?.parameterCount == 2)
@@ -58,6 +69,8 @@ class ButtonField : BigButton, IField {
                 _method?.invoke(_obj);
         }
     }
+
+    override fun setValue(value: Any) {}
 
     fun fromMethod(obj : Any, method: Method) : ButtonField {
         this._method = method;
@@ -78,7 +91,7 @@ class ButtonField : BigButton, IField {
 
         return this;
     }
-    override fun fromField(obj : Any, field : Field, formField: FormField?) : ButtonField {
+    override fun fromField(obj : Any, field : Field, formField: FormField?, advanced: Boolean) : ButtonField {
         throw IllegalStateException("ButtonField should only be used for methods");
     }
     override fun setField() {

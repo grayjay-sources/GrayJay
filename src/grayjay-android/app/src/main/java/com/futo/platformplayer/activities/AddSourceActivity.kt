@@ -1,16 +1,25 @@
 package com.futo.platformplayer.activities
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Animatable
 import android.os.Bundle
 import android.view.View
-import android.widget.*
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
-import com.futo.platformplayer.*
+import com.futo.platformplayer.R
+import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.api.http.ManagedHttpClient
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.setNavigationBarColorAndIcons
 import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.states.StatePlugins
@@ -29,8 +38,10 @@ class AddSourceActivity : AppCompatActivity() {
 
     private lateinit var _sourceHeader: SourceHeaderView;
 
+
     private lateinit var _sourcePermissions: LinearLayout;
     private lateinit var _sourceWarnings: LinearLayout;
+    private lateinit var _sourceWarningsContainer: LinearLayout;
 
     private lateinit var _container: ScrollView;
     private lateinit var _loader: ImageView;
@@ -44,6 +55,10 @@ class AddSourceActivity : AppCompatActivity() {
 
     private var _config: SourcePluginConfig? = null;
     private var _script: String? = null;
+
+    override fun attachBaseContext(newBase: Context?) {
+        super.attachBaseContext(StateApp.instance.getLocaleContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);
@@ -67,6 +82,7 @@ class AddSourceActivity : AppCompatActivity() {
 
         _sourcePermissions = findViewById(R.id.source_permissions);
         _sourceWarnings = findViewById(R.id.source_warnings);
+        _sourceWarningsContainer = findViewById(R.id.container_source_warnings);
 
         _container = findViewById(R.id.configContainer);
         _loader = findViewById(R.id.loader);
@@ -189,23 +205,32 @@ class AddSourceActivity : AppCompatActivity() {
                 config.allowUrls, true)
             )
 
-        val pastelRed = resources.getColor(R.color.pastel_red);
+        val pastelRed = ContextCompat.getColor(this, R.color.pastel_red);
 
-        for(warning in config.getWarnings(script))
+        val warnings = config.getWarnings(script);
+        for(warning in warnings)
             _sourceWarnings.addView(
                 SourceInfoView(this,
                 R.drawable.ic_security_pred,
                 warning.first,
                 warning.second)
                 .withDescriptionColor(pastelRed));
+        _sourceWarningsContainer.isVisible = warnings.isNotEmpty();
 
         setLoading(false);
     }
 
     fun install(config: SourcePluginConfig, script: String) {
+        val isNew = !StatePlatform.instance.getAvailableClients().any { it.id == config.id };
         StatePlugins.instance.installPlugin(this, lifecycleScope, config, script) {
-            if(it)
+            if(it) {
+                StatePlugins.instance.clearUpdateAvailable(config)
+                if(isNew)
+                    lifecycleScope.launch {
+                        StatePlatform.instance.enableClient(listOf(config.id));
+                    }
                 backToSources();
+            }
         }
     }
 

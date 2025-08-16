@@ -40,6 +40,7 @@
                     android:id="@+id/thumbnail_platform_nested"
                     android:layout_width="25dp"
                     android:layout_height="25dp"
+                    android:contentDescription="@string/cd_platform_indicator"
                     app:layout_constraintTop_toTopOf="parent"
                     app:layout_constraintRight_toRightOf="parent"
                     android:layout_margin="5dp"
@@ -106,8 +107,6 @@
                         android:textStyle="normal" />
                 </LinearLayout>
             </androidx.constraintlayout.widget.ConstraintLayout>
-
-
             <LinearLayout
                 android:id="@+id/container_loader"
                 android:layout_width="match_parent"
@@ -115,9 +114,13 @@
                 android:layout_marginBottom="6dp"
                 android:background="#DD000000"
                 android:visibility="gone"
+                android:gravity="center"
                 android:orientation="vertical">
 
-
+                <com.futo.platformplayer.views.LoaderView
+                    android:id="@+id/loader"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp" />
             </LinearLayout>
             <LinearLayout
                 android:id="@+id/container_unavailable"
@@ -173,6 +176,7 @@
                     android:id="@+id/creator_thumbnail"
                     android:layout_width="32dp"
                     android:layout_height="32dp"
+                    android:contentDescription="@string/cd_creator_thumbnail"
                     app:layout_constraintLeft_toLeftOf="parent"
                     app:layout_constraintTop_toTopOf="parent"
                     android:layout_marginStart="10dp"
@@ -242,6 +246,7 @@
                         <ImageView
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
+                            android:contentDescription="@string/cd_button_download"
                             android:scaleType="fitXY"
                             app:srcCompat="@drawable/download_for_offline" />
                     </FrameLayout>
@@ -250,6 +255,7 @@
                         android:id="@+id/thumbnail_platform"
                         android:layout_width="25dp"
                         android:layout_height="25dp"
+                        android:contentDescription="@string/cd_platform_indicator"
                         android:scaleType="centerInside"
                         tools:src="@drawable/ic_peertube"/>
                 </LinearLayout>
@@ -262,45 +268,54 @@
                     app:layout_constraintBottom_toBottomOf="parent"
                     android:orientation="horizontal"
                     android:paddingEnd="6dp">
+
+                    <ImageButton
+                        android:id="@+id/button_add_to_watch_later"
+                        android:layout_width="30dp"
+                        android:layout_height="30dp"
+                        android:contentDescription="@string/cd_button_add_to_watch_later"
+                        android:layout_marginEnd="5dp"
+                        android:background="@drawable/edit_text_background"
+                        app:srcCompat="@drawable/ic_clock_white" />
+
                     <ImageButton
                         android:id="@+id/button_add_to_queue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:layout_width="30dp"
+                        android:layout_height="30dp"
                         android:layout_marginEnd="1dp"
-                        android:paddingTop="7dp"
+                        android:background="@drawable/edit_text_background"
+                        android:contentDescription="@string/add_to_queue"
                         android:paddingStart="6dp"
+                        android:paddingTop="7dp"
                         android:paddingEnd="5dp"
                         android:paddingBottom="3dp"
-                        app:srcCompat="@drawable/ic_queue_16dp"
-                        android:background="@drawable/edit_text_background"
-                        android:contentDescription="@string/add_to_queue" />
+                        app:srcCompat="@drawable/ic_queue_16dp" />
 
                     <LinearLayout
                         android:id="@+id/button_add_to"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:background="@drawable/edit_text_background"
+                        android:layout_height="30dp"
                         android:layout_marginStart="4dp"
+                        android:background="@drawable/edit_text_background"
                         android:gravity="center_vertical"
+                        android:orientation="horizontal"
                         android:padding="4dp">
-                        <ImageButton
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginEnd="4dp"
-                            app:srcCompat="@drawable/ic_add_white_8dp"
-                            android:layout_marginStart="4dp"
-                            android:contentDescription="@string/options" />
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="16dp"
+                            android:paddingTop="1dp"
+                            android:src="@drawable/ic_settings" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="@string/options"
+                            android:layout_marginEnd="4dp"
                             android:background="@color/transparent"
-                            android:textSize="12dp"
-                            android:textColor="@color/white"
                             android:fontFamily="@font/inter_light"
-                            android:layout_marginEnd="4dp"/>
+                            android:text="@string/options"
+                            android:textColor="@color/white"
+                            android:textSize="12dp" />
                     </LinearLayout>
                 </LinearLayout>
             </androidx.constraintlayout.widget.ConstraintLayout>

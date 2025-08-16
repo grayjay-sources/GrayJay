@@ -15,13 +15,17 @@ import com.futo.platformplayer.*
 import com.futo.platformplayer.api.media.models.channels.IPlatformChannel
 import com.futo.platformplayer.constructs.TaskHandler
 import com.futo.platformplayer.fragment.mainactivity.topbar.ImportTopBarFragment
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.states.StatePlatform
+import com.futo.platformplayer.states.StateSubscriptions
 import com.futo.platformplayer.views.AnyAdapterView
 import com.futo.platformplayer.views.AnyAdapterView.Companion.asAny
 import com.futo.platformplayer.views.adapters.viewholders.ImportSubscriptionViewHolder
 import com.futo.platformplayer.views.adapters.viewholders.SelectableIPlatformChannel
-import com.futo.platformplayer.states.StateSubscriptions
-import com.futo.platformplayer.logging.Logger
-import com.futo.platformplayer.states.StatePlatform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ImportSubscriptionsFragment : MainFragment() {
     override val isMainView : Boolean = true;
@@ -33,7 +37,7 @@ class ImportSubscriptionsFragment : MainFragment() {
 
     override fun onShownWithView(parameter: Any?, isBack: Boolean) {
         super.onShownWithView(parameter, isBack);
-        _view?.onShown(parameter, isBack);
+        _view?.onShown(parameter);
     }
 
     override fun onHide() {
@@ -59,10 +63,15 @@ class ImportSubscriptionsFragment : MainFragment() {
     class ImportSubscriptionsView : LinearLayout {
         private val _fragment: ImportSubscriptionsFragment;
 
+        private val SLOWDOWN_COUNT = 100;
+        private val SLOWDOWN_MS: Long = 1000;
+
         private var _spinner: ImageView;
         private var _textSelectDeselectAll: TextView;
         private var _textNothingToImport: TextView;
         private var _textCounter: TextView;
+        private var _loadProgress: TextView;
+        //private var _textLoadMore: TextView;
         private var _adapterView: AnyAdapterView<SelectableIPlatformChannel, ImportSubscriptionViewHolder>;
         private var _links: List<String> = listOf();
         private val _items: ArrayList<SelectableIPlatformChannel> = arrayListOf();
@@ -79,10 +88,12 @@ class ImportSubscriptionsFragment : MainFragment() {
             _textNothingToImport = findViewById(R.id.nothing_to_import);
             _textSelectDeselectAll = findViewById(R.id.text_select_deselect_all);
             _textCounter = findViewById(R.id.text_select_counter);
+            //_textLoadMore = findViewById(R.id.text_load_more);
             _spinner = findViewById(R.id.channel_loader);
+            _loadProgress = findViewById(R.id.text_load_progress);
 
             _adapterView = findViewById<RecyclerView>(R.id.recycler_import).asAny( _items) {
-                it.onSelectedChange.subscribe { c ->
+                it.onSelectedChange.subscribe {
                     updateSelected();
                 };
             };
@@ -111,6 +122,7 @@ class ImportSubscriptionsFragment : MainFragment() {
                 return@TaskHandler channel;
             }).success {
                 _items.add(SelectableIPlatformChannel(it));
+                _loadProgress.text = "(${_items.size}/${_links.size})";
                 _adapterView.adapter.notifyItemInserted(_items.size - 1);
                 loadNext();
             }.exceptionWithParameter<Throwable> { ex, para ->
@@ -120,20 +132,34 @@ class ImportSubscriptionsFragment : MainFragment() {
                 //UIDialogs.showDataRetryDialog(layoutInflater, { load(); });
                 loadNext();
             };
+
+            /*
+            _textLoadMore.setOnClickListener {
+                if (!_limitToastShown) {
+                    return@setOnClickListener;
+                }
+
+                _textLoadMore.visibility = View.GONE;
+                _limitToastShown = false;
+                _counter = 0;
+                load();
+            };
+
+            _textLoadMore.visibility = View.GONE;*/
         }
 
         fun cleanup() {
             _taskLoadChannel.cancel();
         }
 
-        fun onShown(parameter: Any ?, isBack: Boolean) {
+        fun onShown(parameter: Any?) {
             _counter = 0;
             _limitToastShown = false;
             updateSelected();
 
             val itemsRemoved = _items.size;
             _items.clear();
-            _adapterView?.adapter?.notifyItemRangeRemoved(0, itemsRemoved);
+            _adapterView.adapter?.notifyItemRangeRemoved(0, itemsRemoved);
 
             _links = (parameter as List<String>).filter { i -> !StateSubscriptions.instance.isSubscribed(i) }.toList();
             _currentLoadIndex = 0;
@@ -150,12 +176,23 @@ class ImportSubscriptionsFragment : MainFragment() {
                 it.title = context.getString(R.string.import_subscriptions);
                 it.onImport.subscribe(this) {
                     val subscriptionsToImport = _items.filter { i -> i.selected }.toList();
-                    for (subscriptionToImport in subscriptionsToImport) {
-                        StateSubscriptions.instance.addSubscription(subscriptionToImport.channel);
+                    UIDialogs.showDialogProgress(context) {
+                        it.setText("Importing subscriptions..");
+                        _fragment.lifecycleScope.launch(Dispatchers.IO) {
+                            for ((i, subscriptionToImport) in subscriptionsToImport.withIndex()) {
+                                StateSubscriptions.instance.addSubscription(subscriptionToImport.channel);
+                                withContext(Dispatchers.Main) {
+                                    it.setProgress(i.toDouble() / subscriptionsToImport.size);
+                                }
+                            }
+                            withContext(Dispatchers.Main) {
+                                UIDialogs.toast("${subscriptionsToImport.size} " + context.getString(R.string.subscriptions_imported));
+                                _fragment.closeSegment();
+                                it.dismiss();
+                            }
+                        }
                     }
 
-                    UIDialogs.toast("${subscriptionsToImport.size} " + context.getString(R.string.subscriptions_imported));
-                    _fragment.closeSegment();
                 };
             }
         }
@@ -165,7 +202,8 @@ class ImportSubscriptionsFragment : MainFragment() {
             if (_counter >= MAXIMUM_BATCH_SIZE) {
                 if (!_limitToastShown) {
                     _limitToastShown = true;
-                    UIDialogs.toast(context, "Stopped after {requestCount} to avoid rate limit, re-enter to import rest".replace("{requestCount}", MAXIMUM_BATCH_SIZE.toString()));
+                   // _textLoadMore.visibility = View.VISIBLE;
+                    UIDialogs.toast(context, context.getString(R.string.stopped_after_requestcount_to_avoid_rate_limit_click_load_more_to_load_more).replace("{requestCount}", MAXIMUM_BATCH_SIZE.toString()));
                 }
 
                 setLoading(false);
@@ -176,11 +214,25 @@ class ImportSubscriptionsFragment : MainFragment() {
 
         private fun loadNext() {
             _currentLoadIndex++;
+
             if (_currentLoadIndex < _links.size) {
-                load();
-            } else {
-                setLoading(false);
+                if(_currentLoadIndex >= SLOWDOWN_COUNT) {
+                    if(_currentLoadIndex % 10 == 0) {
+                        val estTime = (SLOWDOWN_MS * (_links.size - _currentLoadIndex)) / 1000;
+                        UIDialogs.toast(context, "Import slowed down to prevent rate limit (Estimate ${estTime.toInt().toHumanTimeIndicator()})");
+                    }
+                    _fragment.lifecycleScope.launch(Dispatchers.Default) {
+                        delay(SLOWDOWN_MS);
+                        withContext(Dispatchers.Main) {
+                            load();
+                        }
+                    }
+                }
+                else
+                    load();
             }
+            else
+                setLoading(false);
         }
 
         private fun updateSelected() {
@@ -200,17 +252,19 @@ class ImportSubscriptionsFragment : MainFragment() {
             if(isLoading){
                 (_spinner.drawable as Animatable?)?.start();
                 _spinner.visibility = View.VISIBLE;
+                _loadProgress.visibility = View.VISIBLE;
             }
             else {
                 _spinner.visibility = View.GONE;
                 (_spinner.drawable as Animatable?)?.stop();
+                _loadProgress.visibility = View.GONE;
             }
         }
     }
 
     companion object {
         val TAG = "ImportSubscriptionsFragment";
-        private const val MAXIMUM_BATCH_SIZE = 100;
+        private const val MAXIMUM_BATCH_SIZE = 2000;
         fun newInstance() = ImportSubscriptionsFragment().apply {}
     }
 }

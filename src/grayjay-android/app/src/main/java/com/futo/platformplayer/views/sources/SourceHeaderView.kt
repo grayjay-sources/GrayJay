@@ -8,10 +8,11 @@ import android.util.AttributeSet
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import com.bumptech.glide.Glide
 import com.futo.platformplayer.R
-import com.futo.platformplayer.states.StatePlugins
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
+import com.futo.platformplayer.states.StatePlugins
 
 class SourceHeaderView : LinearLayout {
     private val _sourceImage: ImageView;
@@ -24,6 +25,7 @@ class SourceHeaderView : LinearLayout {
     private val _sourcePlatformUrl: TextView;
     private val _sourceRepositoryUrl: TextView;
     private val _sourceScriptUrl: TextView;
+    private val _sourceScriptConfig: TextView;
     private val _sourceSignature: TextView;
 
     private val _sourcePlatformUrlContainer: LinearLayout;
@@ -44,6 +46,7 @@ class SourceHeaderView : LinearLayout {
         _sourcePlatformUrl = findViewById(R.id.source_platform);
         _sourcePlatformUrlContainer = findViewById(R.id.source_platform_container);
         _sourceScriptUrl = findViewById(R.id.source_script);
+        _sourceScriptConfig = findViewById(R.id.source_config);
         _sourceSignature = findViewById(R.id.source_signature);
 
         _sourceBy.setOnClickListener {
@@ -58,6 +61,10 @@ class SourceHeaderView : LinearLayout {
             if(!_config?.absoluteScriptUrl.isNullOrEmpty())
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(_config?.absoluteScriptUrl)));
         };
+        _sourceScriptConfig.setOnClickListener {
+            if(!_config?.sourceUrl.isNullOrEmpty())
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(_config?.sourceUrl)));
+        }
         _sourcePlatformUrl.setOnClickListener {
             if(!_config?.platformUrl.isNullOrEmpty())
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(_config?.platformUrl)));
@@ -81,6 +88,7 @@ class SourceHeaderView : LinearLayout {
         _sourceVersion.text = config.version.toString();
         _sourceScriptUrl.text = config.absoluteScriptUrl;
         _sourceRepositoryUrl.text = config.repositoryUrl;
+        _sourceScriptConfig.text = config.sourceUrl
         _sourceAuthorID.text = "";
 
         _sourcePlatformUrl.text = config.platformUrl ?: "";
@@ -89,8 +97,8 @@ class SourceHeaderView : LinearLayout {
         else
             _sourcePlatformUrlContainer.visibility = GONE;
 
-        if(!config.authorUrl.isNullOrEmpty())
-            _sourceBy.setTextColor(resources.getColor(R.color.colorPrimary));
+        if(config.authorUrl.isNotEmpty())
+            _sourceBy.setTextColor(ContextCompat.getColor(context, R.color.colorPrimary));
         else
             _sourceBy.setTextColor(Color.WHITE);
 

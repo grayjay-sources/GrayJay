@@ -2,7 +2,11 @@ package com.futo.platformplayer.constructs
 
 import android.util.Log
 import com.futo.platformplayer.logging.Logger
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class TaskHandler<TParameter, TResult> {
     private val TAG = "TaskHandler<TResult>"
@@ -16,7 +20,7 @@ class TaskHandler<TParameter, TResult> {
     private val _task: suspend ((parameter: TParameter) -> TResult);
 
     constructor(claz : Class<TResult>, scope: ()->CoroutineScope) {
-        _task = { claz.newInstance() };
+        _task = { claz.getDeclaredConstructor().newInstance() };
         _scope = scope;
         _dispatcher = Dispatchers.IO;
     }
@@ -32,7 +36,7 @@ class TaskHandler<TParameter, TResult> {
     }
 
     inline fun <reified T : Throwable>exception(noinline cb : (T)->Unit) : TaskHandler<TParameter, TResult> {
-        onError.subscribeConditional { ex, para ->
+        onError.subscribeConditional { ex, _ ->
             if(ex is T) {
                 cb(ex);
                 return@subscribeConditional true;
@@ -76,10 +80,13 @@ class TaskHandler<TParameter, TResult> {
                     try {
                         onSuccess.emit(result);
                         handled = true;
-                    }
-                    catch (e: Throwable) {
+                    } catch (e: Throwable) {
                         Logger.w(TAG, "Handled exception in TaskHandler onSuccess.", e);
-                        onError.emit(e, parameter);
+                        try {
+                            onError.emit(e, parameter);
+                        } catch (e: Throwable) {
+                            Logger.e(TAG, "Unhandled exception in .exception handler 1", e)
+                        }
                         handled = true;
                     }
                 }
@@ -96,10 +103,14 @@ class TaskHandler<TParameter, TResult> {
                     if (id != _idGenerator)
                         return@withContext;
 
-                    if (!onError.emit(e, parameter)) {
-                        Logger.e(TAG, "Uncaught exception handled by TaskHandler.", e);
-                    } else {
-                        //Logger.w(TAG, "Handled exception in TaskHandler invoke.", e); (Prevents duplicate logs)
+                    try {
+                        if (!onError.emit(e, parameter)) {
+                            Logger.e(TAG, "Uncaught exception handled by TaskHandler.", e);
+                        } else {
+                            //Logger.w(TAG, "Handled exception in TaskHandler invoke.", e); (Prevents duplicate logs)
+                        }
+                    } catch (e: Throwable) {
+                        Logger.e(TAG, "Unhandled exception in .exception handler 2", e)
                     }
                 }
             }

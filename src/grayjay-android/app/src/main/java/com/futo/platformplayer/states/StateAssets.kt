@@ -1,7 +1,8 @@
 package com.futo.platformplayer.states
 
 import android.content.Context
-import kotlin.streams.toList
+import com.futo.platformplayer.logging.Logger
+import kotlin.streams.asSequence
 
 /***
  * Used to read assets
@@ -26,34 +27,40 @@ class StateAssets {
                 else
                     break;
             }
-            return (parts1 + parts2.stream().skip(toSkip.toLong()).toList()).joinToString("/");
+            return (parts1 + parts2.stream().skip(toSkip.toLong()).asSequence().toList()).joinToString("/");
         }
 
         /**
          * Does basic asset resolving under certain conditions
          */
-        fun readAssetRelative(context: Context, base: String, path: String, cache: Boolean = false) : String? {
+        fun readAssetRelative(context: Context, base: String, path: String) : String? {
             val finalPath = resolvePath(base, path);
-            return readAsset(context, finalPath, cache);
+            return readAsset(context, finalPath);
         }
         fun readAssetBinRelative(context: Context, base: String, path: String) : ByteArray? {
             val finalPath = resolvePath(base, path);
             return readAssetBin(context, finalPath);
         }
 
-        fun readAsset(context: Context, path: String, cache: Boolean = false) : String? {
-            var text: String? = null;
+        fun readAsset(context: Context, path: String) : String? {
+            var text: String?;
             synchronized(_cache) {
                 if (!_cache.containsKey(path)) {
-                    text = context
-                        ?.assets
-                        ?.open(path)
-                        ?.bufferedReader()
-                        ?.use { it.readText(); };
+                    try {
+                        text = context.assets
+                            ?.open(path)
+                            ?.bufferedReader()
+                            ?.use { it.readText(); };
+                    }
+                    catch(ex: Throwable) {
+                        Logger.e("StateAssets", "Could not open asset: " + path, ex);
+                        return null;
+                    }
+
                     _cache.put(path, text);
+                } else {
+                    text = _cache[path];
                 }
-                else
-                    text = _cache.get(path);
             }
             return text;
         }

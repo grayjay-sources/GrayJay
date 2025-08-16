@@ -4,19 +4,18 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.futo.platformplayer.logging.Logger
-import com.futo.platformplayer.polycentric.PolycentricCache
 import com.futo.platformplayer.R
-import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.api.media.PlatformID
 import com.futo.platformplayer.api.media.models.channels.SerializedChannel
 import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.constructs.TaskHandler
 import com.futo.platformplayer.dp
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.models.Subscription
 import com.futo.platformplayer.selectBestImage
-import com.futo.platformplayer.views.others.CreatorThumbnail
+import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.views.adapters.AnyAdapter
+import com.futo.platformplayer.views.others.CreatorThumbnail
 import com.futo.polycentric.core.toURLInfoSystemLinkUrl
 
 class SubscriptionBarViewHolder(private val _viewGroup: ViewGroup) : AnyAdapter.AnyViewHolder<Subscription>(
@@ -26,14 +25,6 @@ class SubscriptionBarViewHolder(private val _viewGroup: ViewGroup) : AnyAdapter.
     private val _name: TextView;
     private var _subscription: Subscription? = null;
     private var _channel: SerializedChannel? = null;
-
-    private val _taskLoadProfile = TaskHandler<PlatformID, PolycentricCache.CachedPolycentricProfile?>(
-        StateApp.instance.scopeGetter,
-        { PolycentricCache.instance.getProfileAsync(it) })
-        .success { onProfileLoaded(it, true) }
-        .exception<Throwable> {
-            Logger.w(TAG, "Failed to load profile.", it);
-        };
 
     val onClick = Event1<Subscription>();
     
@@ -46,39 +37,13 @@ class SubscriptionBarViewHolder(private val _viewGroup: ViewGroup) : AnyAdapter.
         }
     }
 
-    override fun bind(subscription: Subscription) {
-        _taskLoadProfile.cancel();
+    override fun bind(value: Subscription) {
+        _channel = value.channel;
 
-        _channel = subscription.channel;
+        _creatorThumbnail.setThumbnail(value.channel.thumbnail, false);
+        _name.text = value.channel.name;
 
-        val cachedProfile = PolycentricCache.instance.getCachedProfile(subscription.channel.url, true);
-        if (cachedProfile != null) {
-            onProfileLoaded(cachedProfile, false);
-        } else {
-            _creatorThumbnail.setThumbnail(subscription.channel.thumbnail, false);
-            _taskLoadProfile.run(subscription.channel.id);
-            _name.text = subscription.channel.name;
-        }
-
-        _subscription = subscription;
-    }
-
-    private fun onProfileLoaded(cachedPolycentricProfile: PolycentricCache.CachedPolycentricProfile?, animate: Boolean) {
-        val dp_55 = 55.dp(itemView.context.resources)
-        val profile = cachedPolycentricProfile?.profile;
-        val avatar = profile?.systemState?.avatar?.selectBestImage(dp_55 * dp_55)
-            ?.let { it.toURLInfoSystemLinkUrl(profile.system.toProto(), it.process, profile.systemState.servers.toList()) };
-
-        if (avatar != null) {
-            _creatorThumbnail.setThumbnail(avatar, animate);
-        } else {
-            _creatorThumbnail.setThumbnail(_channel?.thumbnail, animate);
-            _creatorThumbnail.setHarborAvailable(profile != null, animate);
-        }
-
-        if (profile != null) {
-            _name.text = profile.systemState.username;
-        }
+        _subscription = value;
     }
 
     companion object {

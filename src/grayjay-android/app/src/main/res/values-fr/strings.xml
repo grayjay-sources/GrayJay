@@ -256,8 +256,6 @@
     <string name="announcement">Annonce</string>
     <string name="attempt_to_utilize_byte_ranges">Tentative d\'utilisation de plages d\'octets</string>
     <string name="auto_update">Mise à jour automatique</string>
-    <string name="auto_rotate">Rotation automatique</string>
-    <string name="auto_rotate_dead_zone">Zone morte de rotation automatique</string>
     <string name="automatic_backup">Sauvegarde automatique</string>
     <string name="background_behavior">Comportement en arrière-plan</string>
     <string name="background_update">Mise à jour en arrière-plan</string>
@@ -562,7 +560,6 @@
     <string name="not_yet_available_retrying_in_time_s">Pas encore disponible, réessai dans {time}s</string>
     <string name="failed_to_retry_for_live_stream">Échec de la tentative de réessai pour la diffusion en direct</string>
     <string name="this_app_is_in_development_please_submit_bug_reports_and_understand_that_many_features_are_incomplete">Cette application est en développement. Veuillez soumettre des rapports de bug et comprendre que de nombreuses fonctionnalités ne sont pas encore complètes.</string>
-    <string name="please_use_at_least_3_characters">Veuillez utiliser au moins 3 caractères</string>
     <string name="are_you_sure_you_want_to_delete_this_video">Êtes-vous sûr de vouloir supprimer cette vidéo ?</string>
     <string name="tap_to_open">Appuyez pour ouvrir</string>
     <string name="watching">en train de regarder</string>
@@ -661,11 +658,6 @@
         <item>Au démarrage</item>
         <item>Jamais</item>
     </string-array>
-    <string-array name="system_enabled_disabled_array">
-        <item>Désactivé</item>
-        <item>Activé</item>
-        <item>Même que le système</item>
-    </string-array>
     <string-array name="enabled_disabled_array">
         <item>Désactivé</item>
         <item>Activé</item>
@@ -680,8 +672,12 @@
         <item>Activé</item>
     </string-array>
     <string-array name="subscriptions_sortby_array">
-        <item>Nom croissant</item>
-        <item>Nom décroissant</item>
+        <item>Nom Ascendant</item>
+        <item>Nom Descendant</item>
+        <item>Vues Ascendantes</item>
+        <item>Vues Descendantes</item>
+        <item>Temps de visionnage Ascendant</item>
+        <item>Temps de visionnage Descendant</item>
     </string-array>
     <string-array name="feed_style">
         <item>Aperçu</item>
@@ -692,24 +688,18 @@
         <item>Continuer la lecture</item>
         <item>Superposition du lecteur</item>
     </string-array>
+    <string-array name="seek_offset_duration">
+        <item>3 secondes</item>
+        <item>5 secondes</item>
+        <item>10 secondes</item>
+        <item>20 secondes</item>
+        <item>30 secondes</item>
+        <item>60 secondes</item>
+    </string-array>
     <string-array name="resume_after_preview">
         <item>Reprendre depuis le début</item>
         <item>Reprendre après 10s</item>
         <item>Toujours reprendre</item>
-    </string-array>
-    <string-array name="languages">
-        <item>Anglais</item>
-        <item>Espagnol</item>
-        <item>Français</item>
-        <item>Français</item>
-        <item>Coréen</item>
-        <item>Thaï</item>
-        <item>Vietnamien</item>
-        <item>Indonésien</item>
-        <item>Hindi</item>
-        <item>Arabe</item>
-        <item>Turc</item>
-        <item>Russe</item>
     </string-array>
     <string-array name="log_levels">
         <item>Aucun</item>
@@ -717,5 +707,9 @@
         <item>Avertissement</item>
         <item>Information</item>
         <item>Verbeux</item>
+    </string-array>
+    <string-array name="comments_sortby_array">
+        <item>Newest</item>
+        <item>Oldest</item>
     </string-array>
 </resources>

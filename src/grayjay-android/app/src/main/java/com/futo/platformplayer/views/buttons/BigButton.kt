@@ -19,6 +19,9 @@ open class BigButton : LinearLayout {
     private val _textPrimary: TextView;
     private val _textSecondary: TextView;
 
+    val title: String get() = _textPrimary.text.toString();
+    val description: String get() = _textSecondary.text.toString();
+
     val onClick = Event0();
 
     constructor(context : Context, text: String, subText: String, icon: Int, action: ()->Unit) : super(context) {
@@ -37,6 +40,8 @@ open class BigButton : LinearLayout {
         _root.apply {
             isClickable = true;
             setOnClickListener {
+                if(!isEnabled)
+                    return@setOnClickListener;
                 action();
                 onClick.emit();
             };
@@ -51,22 +56,32 @@ open class BigButton : LinearLayout {
         _root.apply {
             isClickable = true;
             setOnClickListener {
+                if(!isEnabled)
+                    return@setOnClickListener;
                 onClick.emit();
             };
         }
 
         val attrArr = context.obtainStyledAttributes(attrs, R.styleable.BigButton, 0, 0);
         val attrIconRef = attrArr.getResourceId(R.styleable.BigButton_buttonIcon, -1);
-        withIcon(attrIconRef);
-
         val attrBackgroundRef = attrArr.getResourceId(R.styleable.BigButton_buttonBackground, -1);
-        withBackground(attrBackgroundRef);
-
         val attrText = attrArr.getText(R.styleable.BigButton_buttonText) ?: "";
-        _textPrimary.text = attrText;
-
         val attrTextSecondary = attrArr.getText(R.styleable.BigButton_buttonSubText) ?: "";
+        attrArr.recycle()
+
+        withIcon(attrIconRef);
+        withBackground(attrBackgroundRef);
+        _textPrimary.text = attrText;
         _textSecondary.text = attrTextSecondary;
+    }
+
+    fun withMargin(bottom: Int, side: Int = 0): BigButton {
+        setPadding(side, 0, side, bottom)
+        return this;
+    }
+
+    fun setSecondaryText(text: String?) {
+        _textSecondary.text = text
     }
 
     fun withPrimaryText(text: String): BigButton {
@@ -107,11 +122,8 @@ open class BigButton : LinearLayout {
 
 
     fun withIcon(bitmap: Bitmap, rounded: Boolean = false): BigButton {
-        if (bitmap != null) {
-            _icon.visibility = View.VISIBLE;
-            _icon.setImageBitmap(bitmap);
-        } else
-            _icon.visibility = View.GONE;
+        _icon.visibility = View.VISIBLE;
+        _icon.setImageBitmap(bitmap);
 
         if (rounded) {
             val shapeAppearanceModel = ShapeAppearanceModel().toBuilder()
@@ -136,5 +148,18 @@ open class BigButton : LinearLayout {
             _root.setBackgroundResource(R.drawable.background_big_button);
 
         return this;
+    }
+
+    fun setButtonEnabled(enabled: Boolean) {
+        if(enabled) {
+            alpha = 1f;
+            isEnabled = true;
+            isClickable = true;
+        }
+        else {
+            alpha = 0.5f;
+            isEnabled = false;
+            isClickable = false;
+        }
     }
 }

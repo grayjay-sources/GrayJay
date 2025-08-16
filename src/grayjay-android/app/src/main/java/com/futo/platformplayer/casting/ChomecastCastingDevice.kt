@@ -2,19 +2,25 @@ package com.futo.platformplayer.casting
 
 import android.os.Looper
 import android.util.Log
-import com.futo.platformplayer.casting.models.FastCastSetVolumeMessage
-import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.getConnectedSocket
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.models.CastingDeviceInfo
-import com.futo.platformplayer.protos.DeviceAuthMessageOuterClass
+import com.futo.platformplayer.protos.ChromeCast
 import com.futo.platformplayer.toHexString
 import com.futo.platformplayer.toInetAddress
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -29,6 +35,7 @@ class ChromecastCastingDevice : CastingDevice {
     override var usedRemoteAddress: InetAddress? = null;
     override var localAddress: InetAddress? = null;
     override val canSetVolume: Boolean get() = true;
+    override val canSetSpeed: Boolean get() = true;
 
     var addresses: Array<InetAddress>? = null;
     var port: Int = 0;
@@ -39,7 +46,9 @@ class ChromecastCastingDevice : CastingDevice {
 
     private var _socket: SSLSocket? = null;
     private var _outputStream: DataOutputStream? = null;
+    private var _outputStreamLock = Object();
     private var _inputStream: DataInputStream? = null;
+    private var _inputStreamLock = Object();
     private var _scopeIO: CoroutineScope? = null;
     private var _requestId = 1;
     private var _started: Boolean = false;
@@ -47,6 +56,13 @@ class ChromecastCastingDevice : CastingDevice {
     private var _transportId: String? = null;
     private var _launching = false;
     private var _mediaSessionId: Int? = null;
+    private var _thread: Thread? = null;
+    private var _pingThread: Thread? = null;
+    private var _launchRetries = 0
+    private val MAX_LAUNCH_RETRIES = 3
+    private var _lastLaunchTime_ms = 0L
+    private var _retryJob: Job? = null
+    private var _autoLaunchEnabled = true
 
     constructor(name: String, addresses: Array<InetAddress>, port: Int) : super() {
         this.name = name;
@@ -64,14 +80,15 @@ class ChromecastCastingDevice : CastingDevice {
         return addresses?.toList() ?: listOf();
     }
 
-    override fun loadVideo(streamType: String, contentType: String, contentId: String, resumePosition: Double, duration: Double) {
-        if (invokeInIOScopeIfRequired({ loadVideo(streamType, contentType, contentId, resumePosition, duration) })) {
+    override fun loadVideo(streamType: String, contentType: String, contentId: String, resumePosition: Double, duration: Double, speed: Double?) {
+        if (invokeInIOScopeIfRequired({ loadVideo(streamType, contentType, contentId, resumePosition, duration, speed) })) {
             return;
         }
 
-        Logger.i(FastCastCastingDevice.TAG, "Start streaming (streamType: $streamType, contentType: $contentType, contentId: $contentId, resumePosition: $resumePosition, duration: $duration)");
+        Logger.i(TAG, "Start streaming (streamType: $streamType, contentType: $contentType, contentId: $contentId, resumePosition: $resumePosition, duration: $duration, speed: $speed)");
 
-        time = resumePosition;
+        setTime(resumePosition);
+        setDuration(duration);
         _streamType = streamType;
         _contentType = contentType;
         _contentId = contentId;
@@ -79,7 +96,7 @@ class ChromecastCastingDevice : CastingDevice {
         playVideo();
     }
 
-    override fun loadContent(contentType: String, content: String, resumePosition: Double, duration: Double) {
+    override fun loadContent(contentType: String, content: String, resumePosition: Double, duration: Double, speed: Double?) {
         //TODO: Can maybe be implemented by sending data:contentType,base64...
         throw NotImplementedError();
     }
@@ -128,12 +145,29 @@ class ChromecastCastingDevice : CastingDevice {
         sendChannelMessage("sender-0", transportId, "urn:x-cast:com.google.cast.media", json);
     }
 
+    override fun changeSpeed(speed: Double) {
+        if (invokeInIOScopeIfRequired { changeSpeed(speed) }) return
+
+        val speedClamped = speed.coerceAtLeast(1.0).coerceAtLeast(1.0).coerceAtMost(2.0)
+        setSpeed(speedClamped)
+        val mediaSessionId = _mediaSessionId ?: return
+        val transportId = _transportId ?: return
+        val setSpeedObject = JSONObject().apply {
+            put("type", "SET_PLAYBACK_RATE")
+            put("mediaSessionId", mediaSessionId)
+            put("playbackRate", speedClamped)
+            put("requestId", _requestId++)
+        }
+
+        sendChannelMessage(sourceId = "sender-0", destinationId = transportId, namespace = "urn:x-cast:com.google.cast.media", json = setSpeedObject.toString())
+    }
+
     override fun changeVolume(volume: Double) {
         if (invokeInIOScopeIfRequired({ changeVolume(volume) })) {
             return;
         }
 
-        this.volume = volume
+        setVolume(volume)
         val setVolumeObject = JSONObject();
         setVolumeObject.put("type", "SET_VOLUME");
 
@@ -219,6 +253,7 @@ class ChromecastCastingDevice : CastingDevice {
         launchObject.put("appId", "CC1AD845");
         launchObject.put("requestId", _requestId++);
         sendChannelMessage("sender-0", "receiver-0", "urn:x-cast:com.google.cast.receiver", launchObject.toString());
+        _lastLaunchTime_ms = System.currentTimeMillis()
     }
 
     private fun getStatus() {
@@ -258,6 +293,7 @@ class ChromecastCastingDevice : CastingDevice {
             _contentType = null;
             _streamType = null;
             _sessionId = null;
+            _launchRetries = 0
             _transportId = null;
         }
 
@@ -266,174 +302,216 @@ class ChromecastCastingDevice : CastingDevice {
     }
 
     override fun start() {
-        val adrs = addresses ?: return;
         if (_started) {
             return;
         }
 
+        _autoLaunchEnabled = true
         _started = true;
         _sessionId = null;
+        _launchRetries = 0
         _mediaSessionId = null;
 
         Logger.i(TAG, "Starting...");
 
         _launching = true;
 
-        _scopeIO?.cancel();
-        Logger.i(TAG, "Cancelled previous scopeIO because a new one is starting.")
-        _scopeIO = CoroutineScope(Dispatchers.IO);
+        ensureThreadsStarted();
+        Logger.i(TAG, "Started.");
+    }
 
-        Thread {
-            connectionState = CastConnectionState.CONNECTING;
+    fun ensureThreadsStarted() {
+        val adrs = addresses ?: return;
 
-            while (_scopeIO?.isActive == true) {
-                try {
-                    val connectedSocket = getConnectedSocket(adrs.toList(), port);
-                    if (connectedSocket == null) {
-                        Thread.sleep(3000);
-                        continue;
-                    }
+        val thread = _thread
+        val pingThread = _pingThread
+        if (thread == null || !thread.isAlive || pingThread == null || !pingThread.isAlive) {
+            Log.i(TAG, "Restarting threads because one of the threads has died")
 
-                    usedRemoteAddress = connectedSocket.inetAddress;
-                    localAddress = connectedSocket.localAddress;
-                    connectedSocket.close();
-                    break;
-                } catch (e: Throwable) {
-                    Logger.w(TAG, "Failed to get setup initial connection to ChromeCast device.", e)
-                }
-            }
+            _scopeIO?.cancel();
+            Logger.i(TAG, "Cancelled previous scopeIO because a new one is starting.")
+            _scopeIO = CoroutineScope(Dispatchers.IO);
 
-            val sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(null, trustAllCerts, null);
-
-            val factory = sslContext.socketFactory;
-
-            //Connection loop
-            while (_scopeIO?.isActive == true) {
-                Logger.i(TAG, "Connecting to Chromecast.");
+            _thread = Thread {
                 connectionState = CastConnectionState.CONNECTING;
 
-                try {
-                    _socket = factory.createSocket(usedRemoteAddress, port) as SSLSocket;
-                    _socket?.startHandshake();
-                    Logger.i(TAG, "Successfully connected to Chromecast at $usedRemoteAddress:$port");
-
-                    try {
-                        _outputStream = DataOutputStream(_socket?.outputStream);
-                        _inputStream = DataInputStream(_socket?.inputStream);
-                    } catch (e: Throwable) {
-                        Logger.i(TAG, "Failed to authenticate to Chromecast.", e);
-                    }
-                } catch (e: IOException) {
-                    _socket?.close();
-                    Logger.i(TAG, "Failed to connect to Chromecast.", e);
-
-                    connectionState = CastConnectionState.CONNECTING;
-                    Thread.sleep(3000);
-                    continue;
-                }
-
-                localAddress = _socket?.localAddress;
-
-                try {
-                    val connectObject = JSONObject();
-                    connectObject.put("type", "CONNECT");
-                    connectObject.put("connType", 0);
-                    sendChannelMessage("sender-0", "receiver-0", "urn:x-cast:com.google.cast.tp.connection", connectObject.toString());
-                } catch (e: Throwable) {
-                    Logger.i(TAG, "Failed to send connect message to Chromecast.", e);
-                    _socket?.close();
-
-                    connectionState = CastConnectionState.CONNECTING;
-                    Thread.sleep(3000);
-                    continue;
-                }
-
-                getStatus();
-
-                val buffer = ByteArray(4096);
-
-                Logger.i(TAG, "Started receiving.");
+                var connectedSocket: Socket? = null
                 while (_scopeIO?.isActive == true) {
                     try {
-                        val inputStream = _inputStream ?: break;
-                        Log.d(TAG, "Receiving next packet...");
-                        val b1 = inputStream.readUnsignedByte();
-                        val b2 = inputStream.readUnsignedByte();
-                        val b3 = inputStream.readUnsignedByte();
-                        val b4 = inputStream.readUnsignedByte();
-                        val size = ((b1.toLong() shl 24) or (b2.toLong() shl 16) or (b3.toLong() shl 8) or b4.toLong()).toInt();
-                        if (size > buffer.size) {
-                            Logger.w(TAG, "Skipping packet that is too large $size bytes.")
-                            inputStream.skip(size.toLong());
+                        val resultSocket = getConnectedSocket(adrs.toList(), port);
+                        if (resultSocket == null) {
+                            Thread.sleep(1000);
                             continue;
                         }
 
-                        Log.d(TAG, "Received header indicating $size bytes. Waiting for message.");
-                        inputStream.read(buffer, 0, size);
-
-                        //TODO: In the future perhaps this size-1 will cause issues, why is there a 0 on the end?
-                        val messageBytes = buffer.sliceArray(IntRange(0, size - 1));
-                        Log.d(TAG, "Received $size bytes: ${messageBytes.toHexString()}.");
-                        val message = DeviceAuthMessageOuterClass.CastMessage.parseFrom(messageBytes);
-                        if (message.namespace != "urn:x-cast:com.google.cast.tp.heartbeat") {
-                            Logger.i(TAG, "Received message: $message");
-                        }
-
-                        try {
-                            handleMessage(message);
-                        } catch (e:Throwable) {
-                            Logger.w(TAG, "Failed to handle message.", e);
-                        }
-                    } catch (e: java.net.SocketException) {
-                        Logger.e(TAG, "Socket exception while receiving.", e);
+                        connectedSocket = resultSocket
+                        usedRemoteAddress = connectedSocket.inetAddress;
+                        localAddress = connectedSocket.localAddress;
                         break;
                     } catch (e: Throwable) {
-                        Logger.e(TAG, "Exception while receiving.", e);
-                        break;
+                        Logger.w(TAG, "Failed to get setup initial connection to ChromeCast device.", e)
+                        Thread.sleep(1000);
                     }
                 }
-                _socket?.close();
-                Logger.i(TAG, "Socket disconnected.");
 
-                connectionState = CastConnectionState.CONNECTING;
-                Thread.sleep(3000);
-            }
+                val sslContext = SSLContext.getInstance("TLS");
+                sslContext.init(null, trustAllCerts, null);
 
-            Logger.i(TAG, "Stopped connection loop.");
-            connectionState = CastConnectionState.DISCONNECTED;
-        }.start();
+                val factory = sslContext.socketFactory;
 
-        //Start ping loop
-        Thread {
-            Logger.i(TAG, "Started ping loop.")
+                val address = InetSocketAddress(usedRemoteAddress, port)
 
-            val pingObject = JSONObject();
-            pingObject.put("type", "PING");
+                //Connection loop
+                while (_scopeIO?.isActive == true) {
+                    _sessionId = null;
+                    _launchRetries = 0
+                    _mediaSessionId = null;
 
-            while (_scopeIO?.isActive == true) {
-                try {
-                    sendChannelMessage("sender-0", "receiver-0", "urn:x-cast:com.google.cast.tp.heartbeat", pingObject.toString());
-                    Thread.sleep(5000);
-                } catch (e: Throwable) {
+                    Logger.i(TAG, "Connecting to Chromecast.");
+                    connectionState = CastConnectionState.CONNECTING;
 
+                    try {
+                        _socket?.close()
+                        if (connectedSocket != null) {
+                            Logger.i(TAG, "Using connected socket.")
+                            _socket = factory.createSocket(connectedSocket, connectedSocket.inetAddress.hostAddress, connectedSocket.port, true) as SSLSocket
+                            connectedSocket = null
+                        } else {
+                            Logger.i(TAG, "Using new socket.")
+                            val s = Socket().apply { this.connect(address, 2000) }
+                            _socket = factory.createSocket(s, s.inetAddress.hostAddress, s.port, true) as SSLSocket
+                        }
+
+                        _socket?.startHandshake();
+                        Logger.i(TAG, "Successfully connected to Chromecast at $usedRemoteAddress:$port");
+
+                        try {
+                            _outputStream = DataOutputStream(_socket?.outputStream);
+                            _inputStream = DataInputStream(_socket?.inputStream);
+                        } catch (e: Throwable) {
+                            Logger.i(TAG, "Failed to authenticate to Chromecast.", e);
+                        }
+                    } catch (e: Throwable) {
+                        _socket?.close();
+                        Logger.i(TAG, "Failed to connect to Chromecast.", e);
+
+                        connectionState = CastConnectionState.CONNECTING;
+                        Thread.sleep(1000);
+                        continue;
+                    }
+
+                    localAddress = _socket?.localAddress;
+
+                    try {
+                        val connectObject = JSONObject();
+                        connectObject.put("type", "CONNECT");
+                        connectObject.put("connType", 0);
+                        sendChannelMessage("sender-0", "receiver-0", "urn:x-cast:com.google.cast.tp.connection", connectObject.toString());
+                    } catch (e: Throwable) {
+                        Logger.i(TAG, "Failed to send connect message to Chromecast.", e);
+                        _socket?.close();
+
+                        connectionState = CastConnectionState.CONNECTING;
+                        Thread.sleep(1000);
+                        continue;
+                    }
+
+                    getStatus();
+
+                    val buffer = ByteArray(409600);
+
+                    Logger.i(TAG, "Started receiving.");
+                    while (_scopeIO?.isActive == true) {
+                        try {
+                            val inputStream = _inputStream ?: break;
+
+                            val message = synchronized(_inputStreamLock)
+                            {
+                                Log.d(TAG, "Receiving next packet...");
+                                val b1 = inputStream.readUnsignedByte();
+                                val b2 = inputStream.readUnsignedByte();
+                                val b3 = inputStream.readUnsignedByte();
+                                val b4 = inputStream.readUnsignedByte();
+                                val size =
+                                    ((b1.toLong() shl 24) or (b2.toLong() shl 16) or (b3.toLong() shl 8) or b4.toLong()).toInt();
+                                if (size > buffer.size) {
+                                    Logger.w(TAG, "Skipping packet that is too large $size bytes.")
+                                    inputStream.skip(size.toLong());
+                                    return@synchronized null
+                                }
+
+                                Log.d(TAG, "Received header indicating $size bytes. Waiting for message.");
+                                inputStream.read(buffer, 0, size);
+
+                                //TODO: In the future perhaps this size-1 will cause issues, why is there a 0 on the end?
+                                val messageBytes = buffer.sliceArray(IntRange(0, size - 1));
+                                Log.d(TAG, "Received $size bytes: ${messageBytes.toHexString()}.");
+                                val msg = ChromeCast.CastMessage.parseFrom(messageBytes);
+                                if (msg.namespace != "urn:x-cast:com.google.cast.tp.heartbeat") {
+                                    Logger.i(TAG, "Received message: $msg");
+                                }
+                                return@synchronized msg
+                            }
+
+                            if (message != null) {
+                                try {
+                                    handleMessage(message);
+                                } catch (e: Throwable) {
+                                    Logger.w(TAG, "Failed to handle message.", e);
+                                    break
+                                }
+                            }
+                        } catch (e: java.net.SocketException) {
+                            Logger.e(TAG, "Socket exception while receiving.", e);
+                            break;
+                        } catch (e: Throwable) {
+                            Logger.e(TAG, "Exception while receiving.", e);
+                            break;
+                        }
+                    }
+                    _socket?.close();
+                    Logger.i(TAG, "Socket disconnected.");
+
+                    connectionState = CastConnectionState.CONNECTING;
+                    Thread.sleep(1000);
                 }
-            }
 
-            Logger.i(TAG, "Stopped ping loop.");
-        }.start();
+                Logger.i(TAG, "Stopped connection loop.");
+                connectionState = CastConnectionState.DISCONNECTED;
+            }.apply { start() };
 
-        Logger.i(TAG, "Started.");
+            //Start ping loop
+            _pingThread = Thread {
+                Logger.i(TAG, "Started ping loop.")
+
+                val pingObject = JSONObject();
+                pingObject.put("type", "PING");
+
+                while (_scopeIO?.isActive == true) {
+                    try {
+                        sendChannelMessage("sender-0", "receiver-0", "urn:x-cast:com.google.cast.tp.heartbeat", pingObject.toString());
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "Failed to send ping.");
+                    }
+
+                    Thread.sleep(5000);
+                }
+
+                Logger.i(TAG, "Stopped ping loop.");
+            }.apply { start() };
+        } else {
+            Log.i(TAG, "Threads still alive, not restarted")
+        }
     }
 
     private fun sendChannelMessage(sourceId: String, destinationId: String, namespace: String, json: String) {
         try {
-            val castMessage = DeviceAuthMessageOuterClass.CastMessage.newBuilder()
-                .setProtocolVersion(DeviceAuthMessageOuterClass.CastMessage.ProtocolVersion.CASTV2_1_0)
+            val castMessage = ChromeCast.CastMessage.newBuilder()
+                .setProtocolVersion(ChromeCast.CastMessage.ProtocolVersion.CASTV2_1_0)
                 .setSourceId(sourceId)
                 .setDestinationId(destinationId)
                 .setNamespace(namespace)
-                .setPayloadType(DeviceAuthMessageOuterClass.CastMessage.PayloadType.STRING)
+                .setPayloadType(ChromeCast.CastMessage.PayloadType.STRING)
                 .setPayloadUtf8(json)
                 .build();
 
@@ -444,11 +522,15 @@ class ChromecastCastingDevice : CastingDevice {
             }
         } catch (e: Throwable) {
             Logger.w(TAG, "Failed to send channel message (sourceId: $sourceId, destinationId: $destinationId, namespace: $namespace, json: $json)", e);
+            _socket?.close();
+            Logger.i(TAG, "Socket disconnected.");
+
+            connectionState = CastConnectionState.CONNECTING;
         }
     }
 
-    private fun handleMessage(message: DeviceAuthMessageOuterClass.CastMessage) {
-        if (message.payloadType == DeviceAuthMessageOuterClass.CastMessage.PayloadType.STRING) {
+    private fun handleMessage(message: ChromeCast.CastMessage) {
+        if (message.payloadType == ChromeCast.CastMessage.PayloadType.STRING) {
             val jsonObject = JSONObject(message.payloadUtf8);
             val type = jsonObject.getString("type");
             if (type == "RECEIVER_STATUS") {
@@ -466,10 +548,12 @@ class ChromecastCastingDevice : CastingDevice {
 
                         if (appId == "CC1AD845") {
                             sessionIsRunning = true;
+                            _autoLaunchEnabled = false
 
                             if (_sessionId == null) {
                                 connectionState = CastConnectionState.CONNECTED;
                                 _sessionId = applicationUpdate.getString("sessionId");
+                                _launchRetries = 0
 
                                 val transportId = applicationUpdate.getString("transportId");
                                 connectMediaChannel(transportId);
@@ -477,36 +561,56 @@ class ChromecastCastingDevice : CastingDevice {
                                 _transportId = transportId;
 
                                 requestMediaStatus();
-                                playVideo();
                             }
                         }
                     }
                 }
 
                 if (!sessionIsRunning) {
-                    _sessionId = null;
-                    _mediaSessionId = null;
-                    time = 0.0;
-                    _transportId = null;
-                    Logger.w(TAG, "Session not found.");
+                    if (System.currentTimeMillis() - _lastLaunchTime_ms > 5000) {
+                        _sessionId = null
+                        _mediaSessionId = null
+                        _transportId = null
 
-                    if (_launching) {
-                        Logger.i(TAG, "Player not found, launching.");
-                        launchPlayer();
+                        if (_autoLaunchEnabled) {
+                            if (_launching && _launchRetries < MAX_LAUNCH_RETRIES) {
+                                Logger.i(TAG, "No player yet; attempting launch #${_launchRetries + 1}")
+                                _launchRetries++
+                                launchPlayer()
+                            } else {
+                                // Maybe the first GET_STATUS came back empty; still try launching
+                                Logger.i(TAG, "Player not found; triggering launch #${_launchRetries + 1}")
+                                _launching = true
+                                _launchRetries++
+                                launchPlayer()
+                            }
+                        } else {
+                            Logger.e(TAG, "Player not found ($_launchRetries, _autoLaunchEnabled = $_autoLaunchEnabled); giving up.")
+                            Logger.i(TAG, "Unable to start media receiver on device")
+                            stop()
+                        }
                     } else {
-                        Logger.i(TAG, "Player not found, disconnecting.");
-                        stop();
+                        if (_retryJob == null) {
+                            Logger.i(TAG, "Scheduled retry job over 5 seconds")
+                            _retryJob = _scopeIO?.launch(Dispatchers.IO) {
+                                delay(5000)
+                                getStatus()
+                                _retryJob = null
+                            }
+                        }
                     }
                 } else {
-                    _launching = false;
+                    _launching = false
+                    _launchRetries = 0
+                    _autoLaunchEnabled = false
                 }
 
                 val volume = status.getJSONObject("volume");
-                val volumeControlType = volume.getString("controlType");
+                //val volumeControlType = volume.getString("controlType");
                 val volumeLevel = volume.getString("level").toDouble();
                 val volumeMuted = volume.getBoolean("muted");
-                val volumeStepInterval = volume.getString("stepInterval").toFloat();
-                this.volume = if (volumeMuted) 0.0 else volumeLevel;
+                //val volumeStepInterval = volume.getString("stepInterval").toFloat();
+                setVolume(if (volumeMuted) 0.0 else volumeLevel);
 
                 Logger.i(TAG, "Status update received volume (level: $volumeLevel, muted: $volumeMuted)");
             } else if (type == "MEDIA_STATUS") {
@@ -517,10 +621,16 @@ class ChromecastCastingDevice : CastingDevice {
 
                     val playerState = status.getString("playerState");
                     val currentTime = status.getDouble("currentTime");
+                    if (status.has("media")) {
+                        val media = status.getJSONObject("media")
+                        if (media.has("duration")) {
+                            setDuration(media.getDouble("duration"))
+                        }
+                    }
 
                     isPlaying = playerState == "PLAYING";
-                    if (isPlaying) {
-                        time = currentTime;
+                    if (isPlaying ||  playerState == "PAUSED") {
+                        setTime(currentTime);
                     }
 
                     val playbackRate = status.getInt("playbackRate");
@@ -530,10 +640,18 @@ class ChromecastCastingDevice : CastingDevice {
                         stopVideo();
                     }
                 }
+
+                val needsLoad = statuses.length() == 0 || (statuses.getJSONObject(0).getString("playerState") == "IDLE")
+                if (needsLoad && _contentId != null && _mediaSessionId == null) {
+                    Logger.i(TAG, "Receiver idle, sending initial LOAD")
+                    playVideo()
+                }
             } else if (type == "CLOSE") {
                 if (message.sourceId == "receiver-0") {
                     Logger.i(TAG, "Close received.");
-                    stop();
+                    stopCasting();
+                } else if (_transportId == message.sourceId) {
+                    throw Exception("Transport id closed.")
                 }
             }
         } else {
@@ -548,13 +666,16 @@ class ChromecastCastingDevice : CastingDevice {
             return;
         }
 
-        val serializedSizeBE = ByteArray(4);
-        serializedSizeBE[0] = (data.size shr 24 and 0xff).toByte();
-        serializedSizeBE[1] = (data.size shr 16 and 0xff).toByte();
-        serializedSizeBE[2] = (data.size shr 8 and 0xff).toByte();
-        serializedSizeBE[3] = (data.size and 0xff).toByte();
-        outputStream.write(serializedSizeBE);
-        outputStream.write(data);
+        synchronized(_outputStreamLock)
+        {
+            val serializedSizeBE = ByteArray(4);
+            serializedSizeBE[0] = (data.size shr 24 and 0xff).toByte();
+            serializedSizeBE[1] = (data.size shr 16 and 0xff).toByte();
+            serializedSizeBE[2] = (data.size shr 8 and 0xff).toByte();
+            serializedSizeBE[3] = (data.size and 0xff).toByte();
+            outputStream.write(serializedSizeBE);
+            outputStream.write(data);
+        }
 
         //Log.d(TAG, "Sent ${data.size} bytes.");
     }
@@ -564,6 +685,13 @@ class ChromecastCastingDevice : CastingDevice {
         usedRemoteAddress = null;
         localAddress = null;
         _started = false;
+
+        _contentId = null
+        _contentType = null
+        _streamType = null
+
+        _retryJob?.cancel()
+        _retryJob = null
 
         val socket = _socket;
         val scopeIO = _scopeIO;
@@ -582,6 +710,8 @@ class ChromecastCastingDevice : CastingDevice {
             Logger.i(TAG, "Cancelled scopeIO without open socket.")
         }
 
+        _pingThread = null;
+        _thread = null;
         _scopeIO = null;
         _socket = null;
         _outputStream = null;

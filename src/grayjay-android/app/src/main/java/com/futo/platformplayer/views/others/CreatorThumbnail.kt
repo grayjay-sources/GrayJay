@@ -9,15 +9,21 @@ import android.view.View
 import android.widget.ImageView
 import androidx.constraintlayout.widget.ConstraintLayout
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.futo.platformplayer.R
 import com.futo.platformplayer.constructs.Event1
+import com.futo.platformplayer.getDataLinkFromUrl
 import com.futo.platformplayer.images.GlideHelper.Companion.crossfade
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.views.IdenticonView
+import userpackage.Protocol
 
 class CreatorThumbnail : ConstraintLayout {
     private val _root: ConstraintLayout;
     private val _imageChannelThumbnail: ImageView;
     private val _imageNewActivity: ImageView;
     private val _imageNeoPass: ImageView;
+    private val _identicon: IdenticonView;
     private var _harborAnimator: ObjectAnimator? = null;
     private var _imageAnimator: ObjectAnimator? = null;
 
@@ -28,19 +34,23 @@ class CreatorThumbnail : ConstraintLayout {
 
         _root = findViewById(R.id.root);
         _imageChannelThumbnail = findViewById(R.id.image_channel_thumbnail);
+        _identicon = findViewById(R.id.identicon);
         _imageChannelThumbnail.clipToOutline = true;
+        _identicon.clipToOutline = true;
+        _imageChannelThumbnail.visibility = View.GONE
         _imageNewActivity = findViewById(R.id.image_new_activity);
         _imageNeoPass = findViewById(R.id.image_neopass);
 
         if (!isInEditMode) {
-            setHarborAvailable(false, animate = false);
+            setHarborAvailable(false, animate = false, system = null);
             setNewActivity(false);
         }
     }
 
     fun clear() {
+        _imageChannelThumbnail.visibility = View.GONE;
         _imageChannelThumbnail.setImageResource(R.drawable.placeholder_channel_thumbnail);
-        setHarborAvailable(false, animate = false);
+        setHarborAvailable(false, animate = false, system = null);
         setNewActivity(false);
     }
 
@@ -50,29 +60,42 @@ class CreatorThumbnail : ConstraintLayout {
             return;
         }
 
+        _imageChannelThumbnail.visibility = View.VISIBLE;
+
         _harborAnimator?.cancel();
         _harborAnimator = null;
 
         _imageAnimator?.cancel();
         _imageAnimator = null;
 
-        setHarborAvailable(url.startsWith("polycentric://"), animate);
+        if (url.startsWith("polycentric://")) {
+            try {
+                val dataLink = url.getDataLinkFromUrl()
+                setHarborAvailable(true, animate, dataLink?.system);
+            } catch (e: Throwable) {
+                setHarborAvailable(false, animate, null);
+            }
+        } else {
+            setHarborAvailable(false, animate, null);
+        }
 
         if (animate) {
             Glide.with(_imageChannelThumbnail)
                 .load(url)
                 .placeholder(R.drawable.placeholder_channel_thumbnail)
+                .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                 .crossfade()
-                .into(_imageChannelThumbnail);
+                .into(_imageChannelThumbnail)
         } else {
             Glide.with(_imageChannelThumbnail)
                 .load(url)
                 .placeholder(R.drawable.placeholder_channel_thumbnail)
+                .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                 .into(_imageChannelThumbnail);
         }
     }
 
-    fun setHarborAvailable(available: Boolean, animate: Boolean) {
+    fun setHarborAvailable(available: Boolean, animate: Boolean, system: Protocol.PublicKey?) {
         _harborAnimator?.cancel();
         _harborAnimator = null;
 
@@ -84,6 +107,13 @@ class CreatorThumbnail : ConstraintLayout {
             }
         } else {
             _imageNeoPass.visibility = View.GONE;
+        }
+
+        if (system != null) {
+            _identicon.hashString = system.toString()
+            _identicon.visibility = View.VISIBLE
+        } else {
+            _identicon.visibility = View.GONE
         }
     }
 

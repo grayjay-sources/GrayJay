@@ -1,7 +1,12 @@
 package com.futo.platformplayer
 
+import android.util.Log
 import com.google.common.base.CharMatcher
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -165,7 +170,7 @@ private fun parseHextet(ipString: String, start: Int, end: Int): Short {
     var hextet = 0
     for (i in start until end) {
         hextet = hextet shl 4
-        hextet = hextet or ipString[i].digitToIntOrNull(16)!! ?: -1
+        hextet = hextet or ipString[i].digitToIntOrNull(16)!!
     }
     return hextet.toShort()
 }
@@ -211,23 +216,36 @@ private fun ByteArray.toInetAddress(): InetAddress {
     return InetAddress.getByAddress(this);
 }
 
-fun getConnectedSocket(addresses: List<InetAddress>, port: Int): Socket? {
+fun getConnectedSocket(attemptAddresses: List<InetAddress>, port: Int): Socket? {
+    ensureNotMainThread()
+
+    val timeout = 10000
+    val addresses = if(!Settings.instance.casting.allowIpv6) attemptAddresses.filterIsInstance<Inet4Address>() else attemptAddresses;
+    if(addresses.isEmpty())
+        throw IllegalStateException("No valid addresses found (ipv6: ${(if(Settings.instance.casting.allowIpv6) "enabled" else "disabled")})");
+
     if (addresses.isEmpty()) {
         return null;
     }
 
     if (addresses.size == 1) {
+        val socket = Socket()
+
         try {
-            return Socket(addresses[0], port);
+            return socket.apply { this.connect(InetSocketAddress(addresses[0], port), timeout) }
         } catch (e: Throwable) {
-            //Ignored.
+            Log.i("getConnectedSocket", "Failed to connect to: ${addresses[0]}", e)
+            socket.close()
         }
 
         return null;
     }
 
+    val sortedAddresses: List<InetAddress> = addresses
+        .sortedBy { addr -> addressScore(addr) }
+
     val sockets: ArrayList<Socket> = arrayListOf();
-    for (i in addresses.indices) {
+    for (i in sortedAddresses.indices) {
         sockets.add(Socket());
     }
 
@@ -235,7 +253,7 @@ fun getConnectedSocket(addresses: List<InetAddress>, port: Int): Socket? {
     var connectedSocket: Socket? = null;
     val threads: ArrayList<Thread> = arrayListOf();
     for (i in 0 until sockets.size) {
-        val address = addresses[i];
+        val address = sortedAddresses[i];
         val socket = sockets[i];
         val thread = Thread {
             try {
@@ -245,7 +263,7 @@ fun getConnectedSocket(addresses: List<InetAddress>, port: Int): Socket? {
                     }
                 }
 
-                socket.connect(InetSocketAddress(address, port));
+                socket.connect(InetSocketAddress(address, port), timeout);
 
                 synchronized(syncObject) {
                     if (connectedSocket == null) {
@@ -259,7 +277,7 @@ fun getConnectedSocket(addresses: List<InetAddress>, port: Int): Socket? {
                     }
                 }
             } catch (e: Throwable) {
-                //Ignore
+                Log.i("getConnectedSocket", "Failed to connect to: $address", e)
             }
         };
 
@@ -272,4 +290,47 @@ fun getConnectedSocket(addresses: List<InetAddress>, port: Int): Socket? {
     }
 
     return connectedSocket;
+}
+
+fun InputStream.readHttpHeaderBytes() : ByteArray {
+    val headerBytes = ByteArrayOutputStream()
+    var crlfCount = 0
+
+    while (crlfCount < 4) {
+        val b = read()
+        if (b == -1) {
+            throw IOException("Unexpected end of stream while reading headers")
+        }
+
+        if (b == 0x0D || b == 0x0A) { // CR or LF
+            crlfCount++
+        } else {
+            crlfCount = 0
+        }
+
+        headerBytes.write(b)
+    }
+
+    return headerBytes.toByteArray()
+}
+
+fun InputStream.readLine() : String? {
+    val line = ByteArrayOutputStream()
+    var crlfCount = 0
+
+    while (crlfCount < 2) {
+        val b = read()
+        if (b == -1) {
+            return null
+        }
+
+        if (b == 0x0D || b == 0x0A) { // CR or LF
+            crlfCount++
+        } else {
+            crlfCount = 0
+            line.write(b)
+        }
+    }
+
+    return String(line.toByteArray(), Charsets.UTF_8)
 }

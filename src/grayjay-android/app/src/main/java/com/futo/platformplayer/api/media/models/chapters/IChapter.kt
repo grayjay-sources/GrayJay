@@ -6,15 +6,16 @@ import com.futo.platformplayer.api.media.models.contents.ContentType
 interface IChapter {
     val name: String;
     val type: ChapterType;
-    val timeStart: Int;
-    val timeEnd: Int;
+    val timeStart: Double;
+    val timeEnd: Double;
 }
 
 enum class ChapterType(val value: Int) {
     NORMAL(0),
 
     SKIPPABLE(5),
-    SKIP(6);
+    SKIP(6),
+    SKIPONCE(7);
 
 
 
@@ -22,7 +23,7 @@ enum class ChapterType(val value: Int) {
     companion object {
         fun fromInt(value: Int): ChapterType
         {
-            val result = ChapterType.values().firstOrNull { it.value == value };
+            val result = ChapterType.entries.firstOrNull { it.value == value };
             if(result == null)
                 throw UnknownPlatformException(value.toString());
             return result;

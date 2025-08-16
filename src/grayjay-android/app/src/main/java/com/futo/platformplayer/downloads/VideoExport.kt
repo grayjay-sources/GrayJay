@@ -1,40 +1,36 @@
 package com.futo.platformplayer.downloads
 
-import android.os.Environment
-import com.arthenica.ffmpegkit.*
-import com.futo.platformplayer.api.media.models.streams.sources.*
-import com.futo.platformplayer.constructs.Event1
+import android.content.Context
+import androidx.documentfile.provider.DocumentFile
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.LogCallback
+import com.arthenica.ffmpegkit.ReturnCode
+import com.arthenica.ffmpegkit.StatisticsCallback
+import com.futo.platformplayer.api.media.models.streams.sources.LocalAudioSource
+import com.futo.platformplayer.api.media.models.streams.sources.LocalSubtitleSource
+import com.futo.platformplayer.api.media.models.streams.sources.LocalVideoSource
+import com.futo.platformplayer.helpers.FileHelper.Companion.sanitizeFileName
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.toHumanBitrate
-import kotlinx.coroutines.*
-import java.io.*
-import java.util.concurrent.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.io.OutputStream
+import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.coroutines.resumeWithException
 
 @kotlinx.serialization.Serializable
 class VideoExport {
-    var state: State = State.QUEUED;
-
     var videoLocal: VideoLocal;
     var videoSource: LocalVideoSource?;
     var audioSource: LocalAudioSource?;
     var subtitleSource: LocalSubtitleSource?;
-
-    var progress: Double = 0.0;
-    var isCancelled = false;
-
-    var error: String? = null;
-
-    @kotlinx.serialization.Transient
-    val onStateChanged = Event1<State>();
-    @kotlinx.serialization.Transient
-    val onProgressChanged = Event1<Double>();
-
-    fun changeState(newState: State) {
-        state = newState;
-        onStateChanged.emit(newState);
-    }
 
     constructor(videoLocal: VideoLocal, videoSource: LocalVideoSource?, audioSource: LocalAudioSource?, subtitleSource: LocalSubtitleSource?) {
         this.videoLocal = videoLocal;
@@ -43,9 +39,7 @@ class VideoExport {
         this.subtitleSource = subtitleSource;
     }
 
-    suspend fun export(onProgress: ((Double) -> Unit)? = null): File = coroutineScope {
-        if(isCancelled) throw CancellationException("Export got cancelled");
-
+    suspend fun export(context: Context, onProgress: ((Double) -> Unit)? = null, documentRoot: DocumentFile? = null): DocumentFile = coroutineScope {
         val v = videoSource;
         val a = audioSource;
         val s = subtitleSource;
@@ -55,46 +49,53 @@ class VideoExport {
         if (a != null) sourceCount++;
         if (s != null) sourceCount++;
 
-        var outputFile: File? = null;
-        val moviesRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES);
-        val musicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC);
-        val moviesGrayjay = File(moviesRoot, "Grayjay");
-        val musicGrayjay = File(musicRoot, "Grayjay");
-        if(!moviesGrayjay.exists())
-            moviesGrayjay.mkdirs();
-        if(!musicGrayjay.exists())
-            musicGrayjay.mkdirs();
-
+        val outputFile: DocumentFile?;
+        val downloadRoot = documentRoot ?: StateApp.instance.getExternalDownloadDirectory(context) ?: throw Exception("External download directory is not set");
         if (sourceCount > 1) {
-            val outputFileName = toSafeFileName(videoLocal.name) + ".mp4"// + VideoDownload.videoContainerToExtension(v.container);
-            val f = File(moviesGrayjay, outputFileName);
+            val outputFileName = videoLocal.name.sanitizeFileName(true) + ".mp4"// + VideoDownload.videoContainerToExtension(v.container);
+            val f = downloadRoot.createFile("video/mp4", outputFileName)
+                ?: throw Exception("Failed to create file in external directory.");
 
             Logger.i(TAG, "Combining video and audio through FFMPEG.");
-            combine(a?.filePath, v?.filePath, s?.filePath, f.absolutePath, videoLocal.duration.toDouble()) { progress -> onProgress?.invoke(progress) };
+            val tempFile = File(context.cacheDir, "${UUID.randomUUID()}.mp4");
+            try {
+                combine(a?.filePath, v?.filePath, s?.filePath, tempFile.absolutePath, videoLocal.duration.toDouble()) { progress -> onProgress?.invoke(progress) };
+                context.contentResolver.openOutputStream(f.uri)?.use { outputStream ->
+                    copy(tempFile.absolutePath, outputStream) { progress -> onProgress?.invoke(progress) };
+                }
+            } finally {
+                tempFile.delete();
+            }
             outputFile = f;
         } else if (v != null) {
-            val outputFileName = toSafeFileName(videoLocal.name) + "." + VideoDownload.videoContainerToExtension(v.container);
-            val f = File(moviesGrayjay, outputFileName);
+            val outputFileName = videoLocal.name.sanitizeFileName(true) + "." + VideoDownload.videoContainerToExtension(v.container);
+            val f = downloadRoot.createFile(if (v.container == "application/vnd.apple.mpegurl") "video/mp4" else v.container, outputFileName)
+                ?: throw Exception("Failed to create file in external directory.");
+
             Logger.i(TAG, "Copying video.");
-            copy(v.filePath, f.absolutePath) { progress -> onProgress?.invoke(progress) };
+
+            context.contentResolver.openOutputStream(f.uri)?.use { outputStream ->
+                copy(v.filePath, outputStream) { progress -> onProgress?.invoke(progress) };
+            }
+
             outputFile = f;
         } else if (a != null) {
-            val outputFileName = toSafeFileName(videoLocal.name) + "." + VideoDownload.audioContainerToExtension(a.container);
-            val f = File(musicGrayjay, outputFileName);
+            val outputFileName = videoLocal.name.sanitizeFileName(true) + "." + VideoDownload.audioContainerToExtension(a.container);
+            val f = downloadRoot.createFile(if (a.container == "application/vnd.apple.mpegurl") "video/mp4" else a.container, outputFileName)
+                    ?: throw Exception("Failed to create file in external directory.");
+
             Logger.i(TAG, "Copying audio.");
-            copy(a.filePath, f.absolutePath) { progress -> onProgress?.invoke(progress) };
+
+            context.contentResolver.openOutputStream(f.uri)?.use { outputStream ->
+                copy(a.filePath, outputStream) { progress -> onProgress?.invoke(progress) };
+            }
+
             outputFile = f;
         } else {
             throw Exception("Cannot export when no audio or video source is set.");
         }
 
-        onProgressChanged.emit(100.0);
         return@coroutineScope outputFile;
-    }
-
-    private fun toSafeFileName(input: String): String {
-        val safeCharacters = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('-', '_')
-        return input.map { if (it in safeCharacters) it else '_' }.joinToString(separator = "")
     }
 
     private suspend fun combine(inputPathAudio: String?, inputPathVideo: String?, inputPathSubtitles: String?, outputPath: String, duration: Double, onProgress: ((Double) -> Unit)? = null) = withContext(Dispatchers.IO) {
@@ -179,10 +180,9 @@ class VideoExport {
         }
     }
 
-    private suspend fun copy(fromPath: String, toPath: String, bufferSize: Int = 8192, onProgress: ((Double) -> Unit)? = null) {
+    private suspend fun copy(fromPath: String, outputStream: OutputStream, bufferSize: Int = 8192, onProgress: ((Double) -> Unit)? = null) {
         withContext(Dispatchers.IO) {
             var inputStream: FileInputStream? = null
-            var outputStream: FileOutputStream? = null
 
             try {
                 val srcFile = File(fromPath)
@@ -190,17 +190,7 @@ class VideoExport {
                     throw IOException("Source file not found.")
                 }
 
-                val dstFile = File(toPath)
-                val parentDir = dstFile.parentFile ?: throw IOException("Non existent parent dir.")
-
-                if (!parentDir.exists()) {
-                    if (!parentDir.mkdirs()) {
-                        throw IOException("Failed to create destination directory.")
-                    }
-                }
-
                 inputStream = FileInputStream(srcFile)
-                outputStream = FileOutputStream(dstFile)
 
                 val buffer = ByteArray(bufferSize)
                 val totalBytes = srcFile.length()
@@ -221,7 +211,6 @@ class VideoExport {
                 throw IOException("Error occurred while copying file: ${e.message}", e)
             } finally {
                 inputStream?.close()
-                outputStream?.close()
             }
         }
     }

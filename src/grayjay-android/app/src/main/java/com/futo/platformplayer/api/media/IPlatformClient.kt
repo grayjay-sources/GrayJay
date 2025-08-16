@@ -1,5 +1,6 @@
 package com.futo.platformplayer.api.media
 
+import com.futo.platformplayer.api.media.models.IPlatformChannelContent
 import com.futo.platformplayer.api.media.models.PlatformAuthorLink
 import com.futo.platformplayer.api.media.models.ResultCapabilities
 import com.futo.platformplayer.api.media.models.channels.IPlatformChannel
@@ -12,9 +13,9 @@ import com.futo.platformplayer.api.media.models.live.IPlatformLiveEvent
 import com.futo.platformplayer.api.media.models.playback.IPlaybackTracker
 import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylist
 import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylistDetails
+import com.futo.platformplayer.api.media.models.video.IPlatformVideo
 import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.models.ImageVariable
-import com.futo.platformplayer.models.Playlist
 
 /**
  * A client for a specific platform
@@ -35,6 +36,11 @@ interface IPlatformClient {
      * Gets the home recommendations
      */
     fun getHome(): IPager<IPlatformContent>
+
+    /**
+     * Gets the shorts feed
+     */
+    fun getShorts(): IPager<IPlatformVideo>
 
     //Search
     /**
@@ -67,6 +73,11 @@ interface IPlatformClient {
      */
     fun searchChannels(query: String): IPager<PlatformAuthorLink>;
 
+    /**
+     * Searches for channels and returns a content pager
+     */
+    fun searchChannelsAsContent(query: String): IPager<IPlatformContent>;
+
 
     //Video Pages
     /**
@@ -85,6 +96,20 @@ interface IPlatformClient {
      * Gets all videos of a channel, ideally in upload time descending
      */
     fun getChannelContents(channelUrl: String, type: String? = null, order: String? = null, filters: Map<String, List<String>>? = null): IPager<IPlatformContent>;
+
+    /**
+     * Describes what the plugin is capable on peek channel results
+     */
+    fun getPeekChannelTypes(): List<String>;
+    /**
+     * Peeks contents of a channel, upload time descending
+     */
+    fun peekChannelContents(channelUrl: String, type: String? = null): List<IPlatformContent>
+
+    /**
+     * Gets all playlists of a channel
+     */
+    fun getChannelPlaylists(channelUrl: String): IPager<IPlatformPlaylist>
 
     /**
      * Gets the channel url associated with a claimType
@@ -107,6 +132,11 @@ interface IPlatformClient {
      * Gets the playback tracker for a piece of content
      */
     fun getPlaybackTracker(url: String): IPlaybackTracker?;
+
+    /**
+     * Get content recommendations
+     */
+    fun getContentRecommendations(url: String): IPager<IPlatformContent>?;
 
 
     //Comments
@@ -152,6 +182,10 @@ interface IPlatformClient {
      * Retrieves the subscriptions of the currently logged in user
      */
     fun getUserSubscriptions(): Array<String>;
+    /**
+     * Retrieves the history of the currently logged in user
+     */
+    fun getUserHistory(): IPager<IPlatformContent>;
 
 
     fun isClaimTypeSupported(claimType: Int): Boolean;

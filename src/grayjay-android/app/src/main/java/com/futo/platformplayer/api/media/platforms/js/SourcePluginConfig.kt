@@ -4,10 +4,12 @@ import android.net.Uri
 import com.futo.platformplayer.SignatureProvider
 import com.futo.platformplayer.api.media.Serializer
 import com.futo.platformplayer.engine.IV8PluginConfig
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.matchesDomain
 import com.futo.platformplayer.states.StatePlugins
-import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.Contextual
 import java.net.URL
-import java.util.*
+import java.util.UUID
 
 @kotlinx.serialization.Serializable
 class SourcePluginConfig(
@@ -32,6 +34,7 @@ class SourcePluginConfig(
     override val allowEval: Boolean = false,
     override val allowUrls: List<String> = listOf(),
     override val packages: List<String> = listOf(),
+    override val packagesOptional: List<String> = listOf(),
 
     val settings: List<Setting> = listOf(),
 
@@ -45,8 +48,14 @@ class SourcePluginConfig(
     var subscriptionRateLimit: Int? = null,
     var enableInSearch: Boolean = true,
     var enableInHome: Boolean = true,
+    var enableInShorts: Boolean = true,
     var supportedClaimTypes: List<Int> = listOf(),
-    var primaryClaimFieldType: Int? = null
+    var primaryClaimFieldType: Int? = null,
+    var developerSubmitUrl: String? = null,
+    var allowAllHttpHeaderAccess: Boolean = false,
+    var maxDownloadParallelism: Int = 0,
+    var reduceFunctionsInLimitedVersion: Boolean = false,
+    var changelog: HashMap<String, List<String>>? = null
 ) : IV8PluginConfig {
 
     val absoluteIconUrl: String? get() = resolveAbsoluteUrl(iconUrl, sourceUrl);
@@ -76,16 +85,59 @@ class SourcePluginConfig(
     private var _allowUrlsLowerVal: List<String>? = null;
     private val _allowUrlsLower: List<String> get() {
         if(_allowUrlsLowerVal == null)
-            _allowUrlsLowerVal = allowUrls.map { it.lowercase() };
+            _allowUrlsLowerVal = allowUrls.map { it.lowercase() }
+                .filter { it.length > 0 };
         return _allowUrlsLowerVal!!;
     };
+
+    fun isLowRiskUpdate(oldScript: String, newConfig: SourcePluginConfig, newScript: String): Boolean{
+        //New allow header access
+        if(!allowAllHttpHeaderAccess && newConfig.allowAllHttpHeaderAccess)
+            return false;
+
+        //All urls should already be allowed
+        for(url in newConfig.allowUrls) {
+            if(!allowUrls.contains(url))
+                return false;
+        }
+        //All packages should already be allowed
+        for(pack in newConfig.packages) {
+            if(!packages.contains(pack))
+                return false;
+        }
+        for(pack in newConfig.packagesOptional) {
+            if(!packagesOptional.contains(pack))
+                return false;
+        }
+        //Developer Submit Url should be same or empty
+        if(!newConfig.developerSubmitUrl.isNullOrEmpty() && developerSubmitUrl != newConfig.developerSubmitUrl)
+            return false;
+
+        //Should have a public key
+        if(scriptPublicKey.isNullOrEmpty() || scriptSignature.isNullOrEmpty())
+            return false;
+
+        //Should be same public key
+        if(scriptPublicKey != newConfig.scriptPublicKey)
+            return false;
+
+        //Old signature should be valid
+        if(!validate(oldScript))
+            return false;
+
+        //New signature should be valid
+        if(!newConfig.validate(newScript))
+            return false;
+
+        return true;
+    }
 
     fun getWarnings(scriptToCheck: String? = null) : List<Pair<String,String>> {
         val list = mutableListOf<Pair<String,String>>();
 
         val currentlyInstalledPlugin = StatePlugins.instance.getPlugin(id);
         if (currentlyInstalledPlugin != null) {
-            if (currentlyInstalledPlugin.config.scriptPublicKey != scriptPublicKey) {
+            if (currentlyInstalledPlugin.config.scriptPublicKey != scriptPublicKey && !currentlyInstalledPlugin.config.scriptPublicKey.isNullOrEmpty()) {
                 list.add(Pair(
                     "Different Author",
                     "This plugin was signed by a different author. Please ensure that this is correct and that the plugin was not provided by a malicious actor."));
@@ -108,17 +160,27 @@ class SourcePluginConfig(
             list.add(Pair(
                 "Unrestricted Web Access",
                 "This plugin requires access to all URLs, this may include malicious URLs."));
+        if(allowAllHttpHeaderAccess)
+            list.add(Pair(
+                "Unrestricted Http Header access",
+                "Allows this plugin to access all headers (including cookies and authorization headers) for unauthenticated requests."
+            ))
 
         return list;
     }
 
     fun validate(text: String): Boolean {
-        if(scriptPublicKey.isNullOrEmpty())
-            throw IllegalStateException("No public key present");
-        if(scriptSignature.isNullOrEmpty())
-            throw IllegalStateException("No signature present");
+        try {
+            if (scriptPublicKey.isNullOrEmpty())
+                throw IllegalStateException("No public key present");
+            if (scriptSignature.isNullOrEmpty())
+                throw IllegalStateException("No signature present");
 
-        return SignatureProvider.verify(text, scriptSignature, scriptPublicKey);
+            return SignatureProvider.verify(text, scriptSignature, scriptPublicKey);
+        } catch (e: Throwable) {
+            Logger.e(TAG, "Failed to verify due to an unhandled exception", e)
+            return false
+        }
     }
 
     fun isUrlAllowed(url: String): Boolean {
@@ -126,7 +188,20 @@ class SourcePluginConfig(
             return true;
         val uri = Uri.parse(url);
         val host = uri.host?.lowercase() ?: "";
-        return _allowUrlsLower.any { it == host };
+        return _allowUrlsLower.any { it == host || (it.length > 0 && it[0] == '.' && host.matchesDomain(it)) };
+    }
+
+    fun getChangelogString(version: String): String?{
+        if(changelog == null || !changelog!!.containsKey(version))
+            return null;
+        val changelog = changelog!![version]!!;
+        if(changelog.size > 1) {
+            return "Changelog (${version})\n" + changelog.map { " - " + it.trim() }.joinToString("\n");
+        }
+        else if(changelog.size == 1) {
+            return "Changelog (${version})\n" + changelog[0].trim();
+        }
+        return null;
     }
 
     companion object {
@@ -136,6 +211,8 @@ class SourcePluginConfig(
                 obj.sourceUrl = sourceUrl;
             return obj;
         }
+
+        private val TAG = "SourcePluginConfig"
     }
 
     @kotlinx.serialization.Serializable
@@ -144,9 +221,11 @@ class SourcePluginConfig(
         val description: String,
         val type: String,
         val default: String? = null,
-        val variable: String? = null
+        val variable: String? = null,
+        val dependency: String? = null,
+        val warningDialog: String? = null,
+        val options: List<String>? = null
     ) {
-        @kotlinx.serialization.Transient
         val variableOrName: String get() = variable ?: name;
     }
 }

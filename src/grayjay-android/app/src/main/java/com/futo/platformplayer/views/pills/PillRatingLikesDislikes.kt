@@ -16,6 +16,7 @@ import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.constructs.Event3
 import com.futo.platformplayer.states.StatePolycentric
 import com.futo.platformplayer.toHumanNumber
+import com.futo.platformplayer.views.LoaderView
 import com.futo.polycentric.core.ProcessHandle
 
 data class OnLikeDislikeUpdatedArgs(
@@ -29,9 +30,12 @@ data class OnLikeDislikeUpdatedArgs(
 class PillRatingLikesDislikes : LinearLayout {
     private val _textLikes: TextView;
     private val _textDislikes: TextView;
+    private val _loaderViewLikes: LoaderView;
+    private val _loaderViewDislikes: LoaderView;
     private val _seperator: View;
     private val _iconLikes: ImageView;
     private val _iconDislikes: ImageView;
+    private var _isLoading: Boolean = false;
 
     private var _likes = 0L;
     private var _hasLiked = false;
@@ -47,25 +51,81 @@ class PillRatingLikesDislikes : LinearLayout {
         _seperator = findViewById(R.id.pill_seperator);
         _iconDislikes = findViewById(R.id.pill_dislike_icon);
         _iconLikes = findViewById(R.id.pill_like_icon);
+        _loaderViewLikes = findViewById(R.id.loader_likes)
+        _loaderViewDislikes = findViewById(R.id.loader_dislikes)
 
-        _iconLikes.setOnClickListener { StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_like)) { like(it) }; };
-        _textLikes.setOnClickListener { StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_like)) { like(it) }; };
-        _iconDislikes.setOnClickListener { StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_dislike)) { dislike(it) }; };
-        _textDislikes.setOnClickListener { StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_dislike)) { dislike(it) }; };
+        findViewById<LinearLayout>(R.id.layout_like).setOnClickListener { if (!_isLoading) StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_like)) { like(it) }; };
+        findViewById<LinearLayout>(R.id.layout_dislike).setOnClickListener { if (!_isLoading) StatePolycentric.instance.requireLogin(context, context.getString(R.string.please_login_to_dislike)) { dislike(it) }; };
+    }
+
+    fun setLoading(loading: Boolean) {
+        if (_isLoading == loading) {
+            return
+        }
+
+        if (loading) {
+            _textLikes.visibility = View.GONE
+            _loaderViewLikes.visibility = View.VISIBLE
+            _textDislikes.visibility = View.GONE
+            _loaderViewDislikes.visibility = View.VISIBLE
+            _loaderViewLikes.start()
+            _loaderViewDislikes.start()
+        } else {
+            _loaderViewLikes.stop()
+            _loaderViewDislikes.stop()
+            _textLikes.visibility = View.VISIBLE
+            _loaderViewLikes.visibility = View.GONE
+            _textDislikes.visibility = View.VISIBLE
+            _loaderViewDislikes.visibility = View.GONE
+        }
+
+        _isLoading = loading
     }
 
     fun setRating(rating: IRating, hasLiked: Boolean = false, hasDisliked: Boolean = false) {
+        setLoading(false)
+
         when (rating) {
             is RatingLikeDislikes -> {
                 setRating(rating, hasLiked, hasDisliked);
             }
             is RatingLikes -> {
-                setRating(rating, hasLiked, hasDisliked);
+                setRating(rating, hasLiked);
             }
             else -> {
                 throw Exception("Unknown rating type");
             }
         }
+    }
+
+    fun setRating(rating: RatingLikeDislikes, hasLiked: Boolean = false, hasDisliked: Boolean = false) {
+        setLoading(false)
+
+        _textLikes.text = rating.likes.toHumanNumber();
+        _textDislikes.text = rating.dislikes.toHumanNumber();
+        _textLikes.visibility = View.VISIBLE;
+        _textDislikes.visibility = View.VISIBLE;
+        _seperator.visibility = View.VISIBLE;
+        _iconDislikes.visibility = View.VISIBLE;
+        _likes = rating.likes;
+        _dislikes = rating.dislikes;
+        _hasLiked = hasLiked;
+        _hasDisliked = hasDisliked;
+        updateColors();
+    }
+    fun setRating(rating: RatingLikes, hasLiked: Boolean = false) {
+        setLoading(false)
+
+        _textLikes.text = rating.likes.toHumanNumber();
+        _textLikes.visibility = View.VISIBLE;
+        _textDislikes.visibility = View.GONE;
+        _seperator.visibility = View.GONE;
+        _iconDislikes.visibility = View.GONE;
+        _likes = rating.likes;
+        _dislikes = 0;
+        _hasLiked = hasLiked;
+        _hasDisliked = false;
+        updateColors();
     }
 
     fun like(processHandle: ProcessHandle) {
@@ -124,31 +184,5 @@ class PillRatingLikesDislikes : LinearLayout {
             _textDislikes.setTextColor(ContextCompat.getColor(context, R.color.white));
             _iconDislikes.setColorFilter(ContextCompat.getColor(context, R.color.white));
         }
-    }
-
-    fun setRating(rating: RatingLikeDislikes, hasLiked: Boolean = false, hasDisliked: Boolean = false) {
-        _textLikes.text = rating.likes.toHumanNumber();
-        _textDislikes.text = rating.dislikes.toHumanNumber();
-        _textLikes.visibility = View.VISIBLE;
-        _textDislikes.visibility = View.VISIBLE;
-        _seperator.visibility = View.VISIBLE;
-        _iconDislikes.visibility = View.VISIBLE;
-        _likes = rating.likes;
-        _dislikes = rating.dislikes;
-        _hasLiked = hasLiked;
-        _hasDisliked = hasDisliked;
-        updateColors();
-    }
-    fun setRating(rating: RatingLikes, hasLiked: Boolean = false) {
-        _textLikes.text = rating.likes.toHumanNumber();
-        _textLikes.visibility = View.VISIBLE;
-        _textDislikes.visibility = View.GONE;
-        _seperator.visibility = View.GONE;
-        _iconDislikes.visibility = View.GONE;
-        _likes = rating.likes;
-        _dislikes = 0;
-        _hasLiked = hasLiked;
-        _hasDisliked = false;
-        updateColors();
     }
 }

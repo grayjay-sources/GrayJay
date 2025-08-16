@@ -3,9 +3,11 @@ package com.futo.platformplayer.views.fields
 import android.content.Context
 import android.util.AttributeSet
 import android.view.View
-import android.widget.*
+import android.widget.TableRow
+import android.widget.TextView
 import com.futo.platformplayer.R
-import com.futo.platformplayer.constructs.Event2
+import com.futo.platformplayer.constructs.Event3
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.views.others.Toggle
 import java.lang.reflect.Field
 
@@ -28,10 +30,17 @@ class ToggleField : TableRow, IField {
     private val _title : TextView;
     private val _description : TextView;
     private val _toggle : Toggle;
+    private var _lastValue: Boolean = false;
 
     override var reference: Any? = null;
+    override var isAdvanced: Boolean = false;
 
-    override val onChanged = Event2<IField, Any>();
+    override val onChanged = Event3<IField, Any, Any>();
+
+    override val value: Any get() = _lastValue;
+
+    override val searchContent: String?
+        get() = "${_title.text} ${_description.text}";
 
     constructor(context : Context, attrs : AttributeSet? = null) : super(context, attrs){
         inflate(context, R.layout.field_toggle, this);
@@ -40,8 +49,16 @@ class ToggleField : TableRow, IField {
         _description = findViewById(R.id.field_description);
 
         _toggle.onValueChanged.subscribe {
-            onChanged.emit(this, it);
+            val lastVal = _lastValue;
+            Logger.i("ToggleField", "Changed: ${lastVal} -> ${it}");
+            _lastValue = it;
+            onChanged.emit(this, it, lastVal);
         };
+    }
+
+    override fun setValue(value: Any) {
+        if(value is Boolean)
+            _toggle.setValue(value, true, true);
     }
 
     fun withValue(title: String, description: String?, value: Boolean): ToggleField {
@@ -54,11 +71,12 @@ class ToggleField : TableRow, IField {
             _description.visibility = View.GONE;
 
         _toggle.setValue(value, true);
+        _lastValue = value;
 
         return this;
     }
 
-    override fun fromField(obj : Any, field : Field, formField: FormField?) : ToggleField {
+    override fun fromField(obj : Any, field : Field, formField: FormField?, advanced: Boolean) : ToggleField {
         this._field = field;
         this._obj = obj;
 
@@ -70,6 +88,11 @@ class ToggleField : TableRow, IField {
         else
             _title.text = field.name;
 
+        val advancedFieldAttr = field.getAnnotation(AdvancedField::class.java)
+        if(advancedFieldAttr != null || advanced) {
+            isAdvanced = true;
+        }
+
         if(attrField == null || attrField.subtitle == -1)
             _description.visibility = View.GONE;
         else {
@@ -77,15 +100,15 @@ class ToggleField : TableRow, IField {
             _description.visibility = View.VISIBLE;
         }
 
-        val value = field.get(obj);
-        if(value is Boolean)
-            _toggle.setValue(value, true);
-        else if(value is Number)
-            _toggle.setValue((value as Number).toInt() > 0, true);
-        else if(value == null)
-            _toggle.setValue(false, true);
-        else
-            _toggle.setValue(false, true);
+        val toggleValue = when (val value = field.get(obj)) {
+            is Boolean -> value
+            is Number -> value.toInt() > 0
+            null -> false
+            else -> false
+        };
+
+        _toggle.setValue(toggleValue, true);
+        _lastValue = toggleValue;
 
         return this;
     }

@@ -10,9 +10,10 @@
     tools:targetApi="28">
 
     <ImageButton
-        android:id="@+id/exo_minimize"
+        android:id="@+id/button_minimize"
         android:layout_width="50dp"
         android:layout_height="50dp"
+        android:contentDescription="@string/cd_button_minimize"
         android:layout_centerVertical="true"
         android:layout_centerHorizontal="true"
         android:scaleType="fitCenter"
@@ -24,7 +25,7 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
-        android:id="@+id/exo_title"
+        android:id="@+id/text_title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         tools:text="Long title name"
@@ -32,14 +33,14 @@
         android:textSize="15dp"
         android:textColor="@color/white"
         android:fontFamily="@font/inter_bold"
-        app:layout_constraintTop_toTopOf="@id/exo_minimize"
-        app:layout_constraintLeft_toRightOf="@id/exo_minimize"
-        app:layout_constraintBottom_toTopOf="@id/exo_author"
+        app:layout_constraintTop_toTopOf="@id/button_minimize"
+        app:layout_constraintLeft_toRightOf="@id/button_minimize"
+        app:layout_constraintBottom_toTopOf="@id/text_author"
         app:layout_constraintRight_toLeftOf="@id/button_container"
         android:layout_marginTop="7dp"/>
 
     <TextView
-        android:id="@+id/exo_author"
+        android:id="@+id/text_author"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         tools:text="Author"
@@ -47,8 +48,8 @@
         android:textSize="10dp"
         android:textColor="@color/gray_c3"
         android:fontFamily="@font/inter_medium"
-        app:layout_constraintTop_toBottomOf="@id/exo_title"
-        app:layout_constraintLeft_toRightOf="@id/exo_minimize"
+        app:layout_constraintTop_toBottomOf="@id/text_title"
+        app:layout_constraintLeft_toRightOf="@id/button_minimize"
         app:layout_constraintRight_toLeftOf="@id/button_container" />
 
     <LinearLayout
@@ -58,17 +59,46 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintRight_toRightOf="parent">
         <ImageButton
-            android:id="@+id/exo_rotate_lock"
+            android:id="@+id/button_autoplay"
             android:layout_width="50dp"
             android:layout_height="50dp"
+            android:contentDescription="@string/cd_button_autoplay"
+            android:scaleType="fitCenter"
+            android:clickable="true"
+            android:padding="12dp"
+            app:srcCompat="@drawable/autoplay_24px" />
+        <ImageButton
+            android:id="@+id/button_cast"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:contentDescription="@string/cd_cast_button"
+            android:scaleType="fitCenter"
+            android:clickable="true"
+            android:padding="12dp"
+            app:srcCompat="@drawable/ic_cast" />
+        <ImageButton
+            android:id="@+id/button_rotate_lock"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:contentDescription="@string/cd_button_rotate_lock"
             android:scaleType="fitCenter"
             android:clickable="true"
             android:padding="12dp"
             app:srcCompat="@drawable/ic_screen_lock_rotation" />
         <ImageButton
-            android:id="@+id/exo_settings"
+            android:id="@+id/button_loop"
             android:layout_width="50dp"
             android:layout_height="50dp"
+            android:contentDescription="@string/cd_button_loop"
+            android:scaleType="fitCenter"
+            android:clickable="true"
+            android:padding="12dp"
+            app:srcCompat="@drawable/ic_loop" />
+        <ImageButton
+            android:id="@+id/button_settings"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:contentDescription="@string/cd_button_settings"
             android:scaleType="fitCenter"
             android:clickable="true"
             android:padding="12dp"
@@ -76,33 +106,68 @@
     </LinearLayout>
 
     <ImageButton
-        android:id="@id/exo_play"
+        android:id="@+id/button_previous"
         android:layout_width="60dp"
         android:layout_height="60dp"
-        android:padding="10dp"
+        android:contentDescription="@string/cd_button_previous"
+        android:scaleType="centerCrop"
         android:clickable="true"
-        app:srcCompat="@drawable/ic_play_white_nopad"
+        android:layout_marginRight="40dp"
+        android:padding="5dp"
+        app:srcCompat="@drawable/ic_skip_previous"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintRight_toLeftOf="@id/layout_play_pause"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+    <FrameLayout
+        android:id="@+id/layout_play_pause"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintRight_toRightOf="parent" />
+        app:layout_constraintRight_toRightOf="parent">
+
+        <ImageButton
+            android:id="@+id/button_play"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:padding="10dp"
+            android:clickable="true"
+            app:srcCompat="@drawable/ic_play_white_nopad" />
+
+        <ImageButton
+            android:id="@+id/button_pause"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:padding="10dp"
+            android:clickable="true"
+            app:srcCompat="@drawable/ic_pause_white"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintLeft_toLeftOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintRight_toRightOf="parent" />
+    </FrameLayout>
 
     <ImageButton
-        android:id="@id/exo_pause"
+        android:id="@+id/button_next"
         android:layout_width="60dp"
         android:layout_height="60dp"
-        android:padding="10dp"
+        android:contentDescription="@string/cd_button_next"
         android:clickable="true"
-        app:srcCompat="@drawable/ic_pause_white"
+        android:scaleType="centerCrop"
+        android:padding="5dp"
+        android:layout_marginLeft="40dp"
+        app:srcCompat="@drawable/ic_skip_next"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintLeft_toLeftOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintRight_toRightOf="parent" />
+        app:layout_constraintLeft_toRightOf="@id/layout_play_pause"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
     <ImageButton
-        android:id="@+id/exo_fullscreen"
+        android:id="@+id/button_fullscreen"
         android:layout_width="55dp"
         android:layout_height="40dp"
+        android:contentDescription="@string/cd_button_fullscreen"
         android:clickable="true"
         app:srcCompat="@drawable/ic_expand"
         app:layout_constraintRight_toRightOf="parent"
@@ -115,7 +180,7 @@
         android:layout_marginBottom="38dp" />
 
     <TextView
-        android:id="@id/exo_position"
+        android:id="@+id/text_position"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:includeFontPadding="false"
@@ -128,7 +193,7 @@
         android:textStyle="normal"
         android:layout_marginBottom="3dp"
         app:layout_constraintLeft_toLeftOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/exo_progress" />
+        app:layout_constraintBottom_toTopOf="@id/time_progress" />
 
     <TextView
         android:id="@+id/text_divider"
@@ -138,13 +203,13 @@
         android:textSize="13sp"
         android:layout_gravity="bottom"
         android:text="/"
-        app:layout_constraintLeft_toRightOf="@id/exo_position"
-        app:layout_constraintTop_toTopOf="@id/exo_position"
-        app:layout_constraintBottom_toBottomOf="@id/exo_position"
+        app:layout_constraintLeft_toRightOf="@id/text_position"
+        app:layout_constraintTop_toTopOf="@id/text_position"
+        app:layout_constraintBottom_toBottomOf="@id/text_position"
         tools:ignore="HardcodedText" />
 
     <TextView
-        android:id="@id/exo_duration"
+        android:id="@+id/text_duration"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:includeFontPadding="false"
@@ -156,8 +221,8 @@
         android:layout_gravity="bottom"
         android:textStyle="normal"
         app:layout_constraintLeft_toRightOf="@id/text_divider"
-        app:layout_constraintTop_toTopOf="@id/exo_position"
-        app:layout_constraintBottom_toBottomOf="@id/exo_position"/>
+        app:layout_constraintTop_toTopOf="@id/text_position"
+        app:layout_constraintBottom_toBottomOf="@id/text_position"/>
 
 
     <TextView
@@ -169,18 +234,18 @@
         android:layout_marginTop="-2dp"
         android:textSize="11sp"
         android:gravity="left"
-        app:layout_constraintLeft_toRightOf="@id/exo_duration"
-        app:layout_constraintTop_toTopOf="@id/exo_duration"
-        app:layout_constraintBottom_toBottomOf="@id/exo_duration"
-        app:layout_constraintRight_toLeftOf="@id/exo_fullscreen"
+        app:layout_constraintLeft_toRightOf="@id/text_duration"
+        app:layout_constraintTop_toTopOf="@id/text_duration"
+        app:layout_constraintBottom_toBottomOf="@id/text_duration"
+        app:layout_constraintRight_toLeftOf="@id/button_fullscreen"
         android:ellipsize="end"
         android:maxLines="1"
         android:text="">
 
     </TextView>
 
-    <com.google.android.exoplayer2.ui.DefaultTimeBar
-        android:id="@id/exo_progress"
+    <androidx.media3.ui.DefaultTimeBar
+        android:id="@+id/time_progress"
         android:layout_width="match_parent"
         android:layout_height="12dp"
         android:layout_marginStart="20dp"
@@ -189,7 +254,8 @@
         app:scrubber_drawable="@drawable/player_thumb"
         app:bar_height="2dp"
         app:scrubber_disabled_size="0dp"
-        app:scrubber_enabled_size="12dp"
+        app:scrubber_enabled_size="16dp"
+        app:scrubber_dragged_size="20dp"
         app:played_color="@color/colorPrimary"
         app:buffered_color="#AAEEEEEE"
         app:unplayed_color="#88EEEEEE"

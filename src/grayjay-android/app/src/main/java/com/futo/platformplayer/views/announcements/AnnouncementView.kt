@@ -3,11 +3,14 @@ package com.futo.platformplayer.views.announcements
 import android.content.Context
 import android.util.AttributeSet
 import android.view.View
-import android.widget.*
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.futo.platformplayer.R
+import com.futo.platformplayer.constructs.Event0
 import com.futo.platformplayer.dp
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.states.Announcement
@@ -21,7 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class AnnouncementView : LinearLayout {
-    private val _root: ConstraintLayout;
+    private val _root: FrameLayout;
     private val _textTitle: TextView;
     private val _textCounter: TextView;
     private val _textBody: TextView;
@@ -33,15 +36,14 @@ class AnnouncementView : LinearLayout {
     private val _category: String?;
     private var _currentAnnouncement: Announcement? = null;
 
+    val onClose = Event0();
+
     private val _scope: CoroutineScope?;
 
     constructor(context: Context, attrs: AttributeSet? = null) : super(context, attrs) {
         inflate(context, R.layout.view_announcement, this);
 
         _scope = findViewTreeLifecycleOwner()?.lifecycleScope ?: StateApp.instance.scopeOrNull; //TODO: Fetch correct scope
-
-        val dp10 = 10.dp(resources);
-        setPadding(dp10, dp10, dp10, dp10);
 
         _root = findViewById(R.id.root);
         _textTitle = findViewById(R.id.text_title);
@@ -55,7 +57,6 @@ class AnnouncementView : LinearLayout {
 
         _buttonAction.setOnClickListener {
             val a = _currentAnnouncement ?: return@setOnClickListener;
-            val scope = StateApp.instance.scopeOrNull ?: return@setOnClickListener;
             StateAnnouncement.instance.actionAnnouncement(a);
         };
 
@@ -73,6 +74,7 @@ class AnnouncementView : LinearLayout {
 
         val attrArr = context.obtainStyledAttributes(attrs, R.styleable.AnnouncementView, 0, 0);
         _category = attrArr.getText(R.styleable.AnnouncementView_category)?.toString();
+        attrArr.recycle()
 
         refresh();
     }
@@ -99,6 +101,10 @@ class AnnouncementView : LinearLayout {
         setAnnouncement(announcements.firstOrNull(), announcements.size);
     }
 
+    fun isClosed(): Boolean{
+        return _currentAnnouncement == null
+    }
+
     private fun setAnnouncement(announcement: Announcement?, count: Int) {
         if(count == 0 && announcement == null)
             Logger.i(TAG, "setAnnouncement announcement=$announcement count=$count");
@@ -106,11 +112,12 @@ class AnnouncementView : LinearLayout {
         _currentAnnouncement = announcement;
 
         if (announcement == null) {
-            _root.visibility = View.GONE;
+            _root.visibility = View.GONE
+            onClose.emit()
             return;
         }
 
-        _root.visibility = View.VISIBLE;
+        _root.visibility = View.VISIBLE
 
         _textTitle.text = announcement.title;
         _textBody.text = announcement.msg;

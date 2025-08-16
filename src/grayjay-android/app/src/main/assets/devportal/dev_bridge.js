@@ -233,6 +233,9 @@ function pluginRemoteProp(objID, propName) {
 function pluginRemoteCall(objID, methodName, args) {
     return JSON.parse(syncPOST("/plugin/remoteCall?id=" + objID + "&method=" + methodName, {}, JSON.stringify(args)));
 }
+function pluginRemoteTest(methodName, args) {
+    return JSON.parse(syncPOST("/plugin/remoteTest?method=" + methodName, {}, JSON.stringify(args)));
+}
 
 function pluginIsLoggedIn(cb, err) {
     fetch("/plugin/isLoggedIn", {
@@ -258,6 +261,17 @@ function getDevLogs(lastIndex, cb) {
     })
         .then(x=>x.json())
         .then(y=> cb && cb(y));
+}
+function getDevHttpExchanges(cb) {
+    fetch("/plugin/getDevHttpExchanges", {
+        timeout: 1000
+    })
+        .then(x=>x.json())
+        .then(y=> cb && cb(y));
+}
+function setDevHttpProxy(url, port) {
+    return fetch("/dev/setDevProxy?url=" + encodeURIComponent(url) + "&port=" + port)
+        .then(x=>x.json());
 }
 function sendFakeDevLog(devId, msg) {
     return syncGET("/plugin/fakeDevLog?devId=" + devId + "&msg=" + msg, {});

@@ -5,6 +5,7 @@ import com.caoccao.javet.values.primitive.V8ValueInteger
 import com.caoccao.javet.values.reference.V8ValueArray
 import com.caoccao.javet.values.reference.V8ValueObject
 import com.futo.platformplayer.engine.IV8PluginConfig
+import com.futo.platformplayer.ensureIsBusy
 import com.futo.platformplayer.expectV8Variant
 import com.futo.platformplayer.getOrDefault
 import com.futo.platformplayer.getOrThrow
@@ -29,6 +30,8 @@ class ResultCapabilities(
         const val TYPE_LIVE = "LIVE";
         const val TYPE_POSTS = "POSTS";
         const val TYPE_MIXED = "MIXED";
+        const val TYPE_SUBSCRIPTIONS = "SUBSCRIPTIONS";
+        const val TYPE_SHORTS = "SHORTS";
 
         const val ORDER_CHONOLOGICAL = "CHRONOLOGICAL";
 
@@ -44,6 +47,7 @@ class ResultCapabilities(
 
         fun fromV8(config: IV8PluginConfig, value: V8ValueObject): ResultCapabilities {
             val contextName = "ResultCapabilities";
+            value.ensureIsBusy();
             return ResultCapabilities(
                 value.getOrThrow<V8ValueArray>(config, "types", contextName).toArray().map { it.expectV8Variant(config, "Capabilities.types") },
                 value.getOrThrow<V8ValueArray>(config, "sorts", contextName).toArray().map { it.expectV8Variant(config, "Capabilities.sorts"); },
@@ -63,11 +67,11 @@ class FilterGroup(
     val isMultiSelect: Boolean,
     val id: String? = null
 ) {
-    @kotlinx.serialization.Transient
     val idOrName: String get() = id ?: name;
 
     companion object {
         fun fromV8(config: IV8PluginConfig, value: V8ValueObject): FilterGroup {
+            value.ensureIsBusy();
             return FilterGroup(
                 value.getString("name"),
                 value.getOrDefault<V8ValueArray>(config, "filters", "FilterGroup", null)
@@ -89,6 +93,7 @@ class FilterCapability(
 
     companion object {
         fun fromV8(obj: V8ValueObject): FilterCapability {
+            obj.ensureIsBusy();
             val value = obj.get("value") as V8Value;
             return FilterCapability(
                 obj.getString("name"),

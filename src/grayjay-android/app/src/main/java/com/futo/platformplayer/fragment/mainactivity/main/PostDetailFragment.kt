@@ -9,6 +9,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewPropertyAnimator
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -19,8 +20,8 @@ import androidx.core.view.children
 import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.futo.platformplayer.R
+import com.futo.platformplayer.Settings
 import com.futo.platformplayer.UIDialogs
-import com.futo.platformplayer.UISlideOverlays
 import com.futo.platformplayer.api.media.PlatformID
 import com.futo.platformplayer.api.media.models.Thumbnails
 import com.futo.platformplayer.api.media.models.comments.PolycentricPlatformComment
@@ -34,25 +35,27 @@ import com.futo.platformplayer.dp
 import com.futo.platformplayer.fixHtmlWhitespace
 import com.futo.platformplayer.images.GlideHelper.Companion.crossfade
 import com.futo.platformplayer.logging.Logger
-import com.futo.platformplayer.polycentric.PolycentricCache
+import com.futo.platformplayer.setPlatformPlayerLinkMovementMethod
 import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.states.StatePolycentric
 import com.futo.platformplayer.toHumanNowDiffString
 import com.futo.platformplayer.toHumanNumber
+import com.futo.platformplayer.views.adapters.ChannelTab
+import com.futo.platformplayer.views.adapters.feedtypes.PreviewPostView
 import com.futo.platformplayer.views.comments.AddCommentView
-import com.futo.platformplayer.views.segments.CommentsList
 import com.futo.platformplayer.views.others.CreatorThumbnail
-import com.futo.platformplayer.views.platform.PlatformIndicator
-import com.futo.platformplayer.views.subscriptions.SubscribeButton
-import com.futo.platformplayer.views.others.Toggle
-import com.futo.platformplayer.views.adapters.PreviewPostView
 import com.futo.platformplayer.views.overlays.RepliesOverlay
 import com.futo.platformplayer.views.pills.PillRatingLikesDislikes
+import com.futo.platformplayer.views.platform.PlatformIndicator
+import com.futo.platformplayer.views.segments.CommentsList
+import com.futo.platformplayer.views.subscriptions.SubscribeButton
 import com.futo.polycentric.core.ApiMethods
 import com.futo.polycentric.core.ContentType
 import com.futo.polycentric.core.Models
 import com.futo.polycentric.core.Opinion
+import com.futo.polycentric.core.PolycentricProfile
+import com.futo.polycentric.core.fullyBackfillServersAnnounceExceptions
 import com.google.android.flexbox.FlexboxLayout
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.shape.CornerFamily
@@ -108,7 +111,7 @@ class PostDetailFragment : MainFragment {
         private var _isLoading = false;
         private var _post: IPlatformPostDetails? = null;
         private var _postOverview: IPlatformPost? = null;
-        private var _polycentricProfile: PolycentricCache.CachedPolycentricProfile? = null;
+        private var _polycentricProfile: PolycentricProfile? = null;
         private var _version = 0;
         private var _isRepliesVisible: Boolean = false;
         private var _repliesAnimator: ViewPropertyAnimator? = null;
@@ -133,10 +136,7 @@ class PostDetailFragment : MainFragment {
         private val _imageDislikeIcon: ImageView;
         private val _textDislikes: TextView;
 
-        private val _textComments: TextView;
-        private val _textCommentType: TextView;
         private val _addCommentView: AddCommentView;
-        private val _toggleCommentType: Toggle;
 
         private val _rating: PillRatingLikesDislikes;
 
@@ -150,6 +150,10 @@ class PostDetailFragment : MainFragment {
 
         private val _commentsList: CommentsList;
 
+        private var _commentType: Boolean? = null;
+        private val _buttonPolycentric: Button
+        private val _buttonPlatform: Button
+
         private val _taskLoadPost = if(!isInEditMode) TaskHandler<String, IPlatformPostDetails>(
             StateApp.instance.scopeGetter,
             {
@@ -161,10 +165,15 @@ class PostDetailFragment : MainFragment {
             .success { setPostDetails(it) }
             .exception<Throwable> {
                 Logger.w(ChannelFragment.TAG, context.getString(R.string.failed_to_load_post), it);
-                UIDialogs.showGeneralRetryErrorDialog(context, context.getString(R.string.failed_to_load_post), it, ::fetchPost);
+                UIDialogs.showGeneralRetryErrorDialog(context, context.getString(R.string.failed_to_load_post), it, ::fetchPost, null, _fragment);
             } else TaskHandler(IPlatformPostDetails::class.java) { _fragment.lifecycleScope };
 
-        private val _taskLoadPolycentricProfile = TaskHandler<PlatformID, PolycentricCache.CachedPolycentricProfile?>(StateApp.instance.scopeGetter, { PolycentricCache.instance.getProfileAsync(it) })
+        private val _taskLoadPolycentricProfile = TaskHandler<PlatformID, PolycentricProfile?>(StateApp.instance.scopeGetter, {
+            if (!StatePolycentric.instance.enabled)
+                return@TaskHandler null
+
+            ApiMethods.getPolycentricProfileByClaim(ApiMethods.SERVER, ApiMethods.FUTO_TRUST_ROOT, it.claimFieldType.toLong(), it.claimType.toLong(), it.value!!)
+        })
             .success { it -> setPolycentricProfile(it, animate = true) }
             .exception<Throwable> {
                 Logger.w(TAG, "Failed to load claims.", it);
@@ -196,9 +205,6 @@ class PostDetailFragment : MainFragment {
             _textDislikes = findViewById(R.id.text_dislikes);
 
             _commentsList = findViewById(R.id.comments_list);
-            _textCommentType = findViewById(R.id.text_comment_type);
-            _toggleCommentType = findViewById(R.id.toggle_comment_type);
-            _textComments = findViewById(R.id.text_comments);
             _addCommentView = findViewById(R.id.add_comment_view);
 
             _rating = findViewById(R.id.rating);
@@ -211,6 +217,11 @@ class PostDetailFragment : MainFragment {
 
             _repliesOverlay = findViewById(R.id.replies_overlay);
 
+            _buttonPolycentric = findViewById(R.id.button_polycentric)
+            _buttonPlatform = findViewById(R.id.button_platform)
+
+            _textContent.setPlatformPlayerLinkMovementMethod(context);
+
             _buttonSubscribe.onSubscribed.subscribe {
                 //TODO: add overlay to layout
                 //UISlideOverlays.showSubscriptionOptionsOverlay(it, _overlayContainer);
@@ -220,11 +231,12 @@ class PostDetailFragment : MainFragment {
             root.removeView(layoutTop);
             _commentsList.setPrependedView(layoutTop);
 
-            _commentsList.onCommentsLoaded.subscribe { count ->
+            /*TODO: Why is this here?
+            _commentsList.onCommentsLoaded.subscribe {
                 updateCommentType(false);
-            };
+            };*/
 
-            _commentsList.onClick.subscribe { c ->
+            _commentsList.onRepliesClick.subscribe { c ->
                 val replyCount = c.replyCount ?: 0;
                 var metadata = "";
                 if (replyCount > 0) {
@@ -233,7 +245,7 @@ class PostDetailFragment : MainFragment {
 
                 if (c is PolycentricPlatformComment) {
                     var parentComment: PolycentricPlatformComment = c;
-                    _repliesOverlay.load(_toggleCommentType.value, metadata, c.contextUrl, c.reference,
+                    _repliesOverlay.load(_commentType!!, metadata, c.contextUrl, c.reference, c,
                         { StatePolycentric.instance.getCommentPager(c.contextUrl, c.reference) },
                         {
                             val newComment = parentComment.cloneWithUpdatedReplyCount((parentComment.replyCount ?: 0) + 1);
@@ -241,31 +253,32 @@ class PostDetailFragment : MainFragment {
                             parentComment = newComment;
                         });
                 } else {
-                    _repliesOverlay.load(_toggleCommentType.value, metadata, null, null, { StatePlatform.instance.getSubComments(c) });
+                    _repliesOverlay.load(_commentType!!, metadata, null, null, c, { StatePlatform.instance.getSubComments(c) });
                 }
 
                 setRepliesOverlayVisible(isVisible = true, animate = true);
             };
 
+            if (StatePolycentric.instance.enabled) {
+                _buttonPolycentric.setOnClickListener {
+                    updateCommentType(false)
+                }
+            } else {
+                _buttonPolycentric.visibility = View.GONE
+            }
 
-            _toggleCommentType.onValueChanged.subscribe {
-                updateCommentType(true);
-            };
-
-            _textCommentType.setOnClickListener {
-                _toggleCommentType.setValue(!_toggleCommentType.value, true);
-                updateCommentType(true);
-            };
-
+            _buttonPlatform.setOnClickListener {
+                updateCommentType(true)
+            }
             _layoutMonetization.visibility = View.GONE;
 
             _buttonSupport.setOnClickListener {
                 val author = _post?.author ?: _postOverview?.author;
-                author?.let { _fragment.navigate<ChannelFragment>(it).selectTab(2); };
+                author?.let { _fragment.navigate<ChannelFragment>(it).selectTab(ChannelTab.SUPPORT); };
             };
 
             _buttonStore.setOnClickListener {
-                _polycentricProfile?.profile?.systemState?.store?.let {
+                _polycentricProfile?.systemState?.store?.let {
                     try {
                         val uri = Uri.parse(it);
                         val intent = Intent(Intent.ACTION_VIEW);
@@ -314,18 +327,22 @@ class PostDetailFragment : MainFragment {
         private fun updatePolycentricRating() {
             _rating.visibility = View.GONE;
 
-            val value = _post?.id?.value ?: _postOverview?.id?.value ?: return;
-            val ref = Models.referenceFromBuffer(value.toByteArray());
+            val ref = Models.referenceFromBuffer((_post?.url ?: _postOverview?.url)?.toByteArray() ?: return)
+            val extraBytesRef = (_post?.id?.value ?: _postOverview?.id?.value)?.let { if (it.isNotEmpty()) it.toByteArray() else null }
             val version = _version;
 
             _rating.onLikeDislikeUpdated.remove(this);
+
+            if (!StatePolycentric.instance.enabled)
+                return
+
             _fragment.lifecycleScope.launch(Dispatchers.IO) {
                 if (version != _version) {
                     return@launch;
                 }
 
                 try {
-                    val queryReferencesResponse = ApiMethods.getQueryReferences(PolycentricCache.SERVER, ref, null,null,
+                    val queryReferencesResponse = ApiMethods.getQueryReferences(ApiMethods.SERVER, ref, null,null,
                         arrayListOf(
                             Protocol.QueryReferencesRequestCountLWWElementReferences.newBuilder().setFromType(
                                 ContentType.OPINION.value).setValue(
@@ -333,7 +350,8 @@ class PostDetailFragment : MainFragment {
                             Protocol.QueryReferencesRequestCountLWWElementReferences.newBuilder().setFromType(
                                 ContentType.OPINION.value).setValue(
                                 ByteString.copyFrom(Opinion.dislike.data)).build()
-                        )
+                        ),
+                        extraByteReferences = listOfNotNull(extraBytesRef)
                     );
 
                     if (version != _version) {
@@ -342,8 +360,8 @@ class PostDetailFragment : MainFragment {
 
                     val likes = queryReferencesResponse.countsList[0];
                     val dislikes = queryReferencesResponse.countsList[1];
-                    val hasLiked = StatePolycentric.instance.hasLiked(ref);
-                    val hasDisliked = StatePolycentric.instance.hasDisliked(ref);
+                    val hasLiked = StatePolycentric.instance.hasLiked(ref.toByteArray())/* || extraBytesRef?.let { StatePolycentric.instance.hasLiked(it) } ?: false*/;
+                    val hasDisliked = StatePolycentric.instance.hasDisliked(ref.toByteArray())/* || extraBytesRef?.let { StatePolycentric.instance.hasDisliked(it) } ?: false*/;
 
                     withContext(Dispatchers.Main) {
                         if (version != _version) {
@@ -364,7 +382,7 @@ class PostDetailFragment : MainFragment {
                             StateApp.instance.scopeOrNull?.launch(Dispatchers.IO) {
                                 try {
                                     Logger.i(TAG, "Started backfill");
-                                    args.processHandle.fullyBackfillServers();
+                                    args.processHandle.fullyBackfillServersAnnounceExceptions();
                                     Logger.i(TAG, "Finished backfill");
                                 } catch (e: Throwable) {
                                     Logger.e(TAG, "Failed to backfill servers", e)
@@ -427,7 +445,7 @@ class PostDetailFragment : MainFragment {
             _taskLoadPolycentricProfile.cancel();
             _version++;
 
-            _toggleCommentType.setValue(false, false);
+            updateCommentType(null)
             _url = null;
             _post = null;
             _postOverview = null;
@@ -468,12 +486,12 @@ class PostDetailFragment : MainFragment {
             if (_postOverview == null) {
                 fetchPolycentricProfile();
                 updatePolycentricRating();
-
-                val ref = value.id.value?.let { Models.referenceFromBuffer(it.toByteArray()); };
-                _addCommentView.setContext(value.url, ref);
+                _addCommentView.setContext(value.url, Models.referenceFromBuffer(value.url.toByteArray()));
             }
 
-            updateCommentType(true);
+            val commentType = !Settings.instance.other.polycentricEnabled || Settings.instance.comments.defaultCommentSection == 1
+            updateCommentType(commentType, true);
+            setLoading(false);
         }
 
         fun setPostOverview(value: IPlatformPost) {
@@ -489,9 +507,7 @@ class PostDetailFragment : MainFragment {
             _textMeta.text = value.datetime?.toHumanNowDiffString()?.let { "$it ago" } ?: "" //TODO: Include view count?
             _textContent.text = value.description.fixHtmlWhitespace();
             _platformIndicator.setPlatformFromClientID(value.id.pluginId);
-
-            val ref = value.id.value?.let { Models.referenceFromBuffer(it.toByteArray()); };
-            _addCommentView.setContext(value.url, ref);
+            _addCommentView.setContext(value.url, Models.referenceFromBuffer(value.url.toByteArray()));
 
             updatePolycentricRating();
             fetchPolycentricProfile();
@@ -596,13 +612,8 @@ class PostDetailFragment : MainFragment {
 
         private fun fetchPolycentricProfile() {
             val author = _post?.author ?: _postOverview?.author ?: return;
-            val cachedPolycentricProfile = PolycentricCache.instance.getCachedProfile(author.url);
-            if (cachedPolycentricProfile != null) {
-                setPolycentricProfile(cachedPolycentricProfile, animate = false);
-            } else {
                 setPolycentricProfile(null, animate = false);
                 _taskLoadPolycentricProfile.run(author.id);
-            }
         }
 
         private fun setChannelMeta(value: IPlatformPost?) {
@@ -628,17 +639,18 @@ class PostDetailFragment : MainFragment {
             _repliesOverlay.cleanup();
         }
 
-        private fun setPolycentricProfile(cachedPolycentricProfile: PolycentricCache.CachedPolycentricProfile?, animate: Boolean) {
-            _polycentricProfile = cachedPolycentricProfile;
+        private fun setPolycentricProfile(polycentricProfile: PolycentricProfile?, animate: Boolean) {
+            _polycentricProfile = polycentricProfile;
 
-            if (cachedPolycentricProfile?.profile == null) {
+            val pp = _polycentricProfile;
+            if (pp == null) {
                 _layoutMonetization.visibility = View.GONE;
-                _creatorThumbnail.setHarborAvailable(false, animate);
+                _creatorThumbnail.setHarborAvailable(false, animate, null);
                 return;
             }
 
             _layoutMonetization.visibility = View.VISIBLE;
-            _creatorThumbnail.setHarborAvailable(true, animate);
+            _creatorThumbnail.setHarborAvailable(true, animate, pp.system.toProto());
         }
 
         private fun fetchPost() {
@@ -662,30 +674,41 @@ class PostDetailFragment : MainFragment {
         private fun fetchPolycentricComments() {
             Logger.i(TAG, "fetchPolycentricComments")
             val post = _post;
-            val idValue = post?.id?.value
-            if (idValue == null) {
-                Logger.w(TAG, "Failed to fetch polycentric comments because id was null")
+            val ref = (_post?.url ?: _postOverview?.url)?.toByteArray()?.let { Models.referenceFromBuffer(it) }
+            val extraBytesRef = (_post?.id?.value ?: _postOverview?.id?.value)?.let { if (it.isNotEmpty()) it.toByteArray() else null }
+
+            if (ref == null) {
+                Logger.w(TAG, "Failed to fetch polycentric comments because url was not set null")
                 _commentsList.clear();
                 return
             }
 
-            _commentsList.load(false) { StatePolycentric.instance.getCommentPager(post.url, Models.referenceFromBuffer(idValue.toByteArray())); };
+            _commentsList.load(false) { StatePolycentric.instance.getCommentPager(post!!.url, ref, listOfNotNull(extraBytesRef)); };
         }
 
-        private fun updateCommentType(reloadComments: Boolean) {
-            if (_toggleCommentType.value) {
-                _textCommentType.text = "Platform";
-                _addCommentView.visibility = View.GONE;
+        private fun updateCommentType(commentType: Boolean?, forceReload: Boolean = false) {
+            val changed = commentType != _commentType
+            _commentType = commentType
 
-                if (reloadComments) {
-                    fetchComments();
-                }
+            if (commentType == null) {
+                _buttonPlatform.setTextColor(resources.getColor(R.color.gray_ac))
+                _buttonPolycentric.setTextColor(resources.getColor(R.color.gray_ac))
             } else {
-                _textCommentType.text = "Polycentric";
-                _addCommentView.visibility = View.VISIBLE;
+                _buttonPlatform.setTextColor(resources.getColor(if (commentType) R.color.white else R.color.gray_ac))
+                _buttonPolycentric.setTextColor(resources.getColor(if (!commentType) R.color.white else R.color.gray_ac))
 
-                if (reloadComments) {
-                    fetchPolycentricComments()
+                if (commentType) {
+                    _addCommentView.visibility = View.GONE;
+
+                    if (forceReload || changed) {
+                        fetchComments();
+                    }
+                } else {
+                    _addCommentView.visibility = View.VISIBLE;
+
+                    if (forceReload || changed) {
+                        fetchPolycentricComments()
+                    }
                 }
             }
         }

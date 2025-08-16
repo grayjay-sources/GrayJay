@@ -7,16 +7,15 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
+import android.content.res.Configuration
 import android.os.Bundle
-import android.view.Gravity
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.core.animation.doOnEnd
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.util.UnstableApi
 import com.futo.platformplayer.R
 import com.futo.platformplayer.Settings
 import com.futo.platformplayer.UIDialogs
@@ -31,14 +30,13 @@ import com.futo.platformplayer.states.StatePayment
 import com.futo.platformplayer.states.StateSubscriptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.Collections
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
 class MenuBottomBarFragment : MainActivityFragment() {
     private var _view: MenuBottomBarView? = null;
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val view = MenuBottomBarView(this, inflater);
         _view = view;
         return view;
@@ -60,7 +58,13 @@ class MenuBottomBarFragment : MainActivityFragment() {
         return _view?.onBackPressed() ?: false;
     }
 
-    @SuppressLint("ViewConstructor")
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        _view?.updateAllButtonVisibility()
+    }
+
+        @SuppressLint("ViewConstructor")
     class MenuBottomBarView : LinearLayout {
         private val _fragment: MenuBottomBarFragment;
         private val _inflater: LayoutInflater;
@@ -78,9 +82,9 @@ class MenuBottomBarFragment : MainActivityFragment() {
         private var _moreButtons = arrayListOf<MenuButton>();
 
         private var _buttonsVisible = 0;
-        private var _subscriptionsVisible = false;
+        private var _subscriptionsVisible = true;
 
-        var currentButtonDefinitions: List<ButtonDefinition>? = null;
+        private var currentButtonDefinitions: List<ButtonDefinition>? = null;
 
         constructor(fragment: MenuBottomBarFragment, inflater: LayoutInflater) : super(inflater.context) {
             _fragment = fragment;
@@ -136,7 +140,7 @@ class MenuBottomBarFragment : MainActivityFragment() {
             val staggerFactor = 3.0f
 
             if (visible) {
-                moreOverlay.visibility = LinearLayout.VISIBLE
+                moreOverlay.visibility = VISIBLE
                 val animations = arrayListOf<Animator>()
                 animations.add(ObjectAnimator.ofFloat(moreOverlayBackground, "alpha", 0.0f, 1.0f).setDuration(duration))
 
@@ -165,7 +169,7 @@ class MenuBottomBarFragment : MainActivityFragment() {
                 animatorSet.doOnEnd {
                     _moreVisibleAnimating = false
                     _moreVisible = false
-                    moreOverlay.visibility = LinearLayout.INVISIBLE
+                    moreOverlay.visibility = INVISIBLE
                 }
                 animatorSet.playTogether(animations)
                 animatorSet.start()
@@ -182,7 +186,7 @@ class MenuBottomBarFragment : MainActivityFragment() {
             _layoutBottomBarButtons.removeAllViews();
 
             _layoutBottomBarButtons.addView(Space(context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             })
 
             for ((index, button) in buttons.withIndex()) {
@@ -196,7 +200,7 @@ class MenuBottomBarFragment : MainActivityFragment() {
                 _layoutBottomBarButtons.addView(menuButton)
                 if (index < buttonDefinitions.size - 1) {
                     _layoutBottomBarButtons.addView(Space(context).apply {
-                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
                     })
                 }
 
@@ -204,7 +208,7 @@ class MenuBottomBarFragment : MainActivityFragment() {
             }
 
             _layoutBottomBarButtons.addView(Space(context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             })
         }
 
@@ -213,19 +217,30 @@ class MenuBottomBarFragment : MainActivityFragment() {
             _moreButtons.clear();
             _layoutMoreButtons.removeAllViews();
 
+            var insertedButtons = 0;
             //Force buy to be on top for more buttons
             val buyIndex = buttons.indexOfFirst { b -> b.id == 98 };
             if (buyIndex != -1) {
                 val button = buttons[buyIndex]
                 buttons.removeAt(buyIndex)
                 buttons.add(0, button)
+                insertedButtons++;
             }
             //Force faq to be second
             val faqIndex = buttons.indexOfFirst { b -> b.id == 97 };
             if (faqIndex != -1) {
                 val button = buttons[faqIndex]
                 buttons.removeAt(faqIndex)
-                buttons.add(1, button)
+                buttons.add(if (insertedButtons == 1) 1 else 0, button)
+                insertedButtons++;
+            }
+            //Force privacy to be third
+            val privacyIndex = buttons.indexOfFirst { b -> b.id == 96 };
+            if (privacyIndex != -1) {
+                val button = buttons[privacyIndex]
+                buttons.removeAt(privacyIndex)
+                buttons.add(if (insertedButtons == 2) 2 else (if(insertedButtons == 1) 1 else 0), button)
+                insertedButtons++;
             }
 
             for (data in buttons) {
@@ -248,24 +263,39 @@ class MenuBottomBarFragment : MainActivityFragment() {
                 button.updateActive(_fragment);
         }
 
+        override fun onConfigurationChanged(newConfig: Configuration?) {
+            super.onConfigurationChanged(newConfig)
+
+            updateAllButtonVisibility()
+        }
+
         fun updateAllButtonVisibility() {
+            // if the more fly-out menu is open the we should close it
+            if(_moreVisible) {
+                setMoreVisible(false)
+            }
+
             val defs = currentButtonDefinitions?.toMutableList() ?: return
-            val metrics = StateApp.instance.displayMetrics ?: resources.displayMetrics;
+            val metrics = resources.displayMetrics
             _buttonsVisible = floor(metrics.widthPixels.toDouble() / 65.dp(resources).toDouble()).roundToInt();
-            if (_buttonsVisible - 2 >= defs.size) {
-                updateBottomMenuButtons(defs.slice(IntRange(0, defs.size - 1)).toMutableList(), false);
+            if (_buttonsVisible >= defs.size) {
+                updateBottomMenuButtons(defs.toMutableList(), false);
+            } else if (_buttonsVisible > 0) {
+                updateBottomMenuButtons(defs.take(_buttonsVisible - 1).toMutableList(), true);
+                updateMoreButtons(defs.drop(_buttonsVisible - 1).toMutableList());
             } else {
-                updateBottomMenuButtons(defs.slice(IntRange(0, _buttonsVisible - 2)).toMutableList(), true);
-                updateMoreButtons(defs.slice(IntRange(_buttonsVisible - 1, defs.size - 1)).toMutableList());
+                updateBottomMenuButtons(mutableListOf(), false)
+                updateMoreButtons(defs.toMutableList())
             }
         }
 
         private fun registerUpdateButtonEvents() {
+            /*
             _subscriptionsVisible = StateSubscriptions.instance.getSubscriptionCount() > 0;
             StateSubscriptions.instance.onSubscriptionsChanged.subscribe(this) { subs, _ ->
                 _subscriptionsVisible = subs.isNotEmpty();
                 updateButtonDefinitions()
-            }
+            }*/
 
             StatePayment.instance.hasPaidChanged.subscribe(this) {
                 _fragment.lifecycleScope.launch(Dispatchers.Main) {
@@ -293,12 +323,16 @@ class MenuBottomBarFragment : MainActivityFragment() {
                 buttonDefinitions.find { d -> d.id == it.id }
             }.toMutableList()
 
-            if (!StatePayment.instance.hasPaid) {
-                newCurrentButtonDefinitions.add(ButtonDefinition(98, R.drawable.ic_paid, R.drawable.ic_paid, R.string.buy, canToggle = false, { it.currentMain is BuyFragment }, { it.navigate<BuyFragment>() }))
+            //Add unconfigured tabs with default values
+            buttonDefinitions.forEach { buttonDefinition ->
+                if (!Settings.instance.tabs.any { it.id == buttonDefinition.id }) {
+                    newCurrentButtonDefinitions.add(buttonDefinition)
+                }
             }
-            newCurrentButtonDefinitions.add(ButtonDefinition(97, R.drawable.ic_quiz, R.drawable.ic_quiz, R.string.faq, canToggle = false, { false }, {
-                it.navigate<BrowserFragment>(Settings.URL_FAQ);
-            }))
+
+            if (!StatePayment.instance.hasPaid) {
+                newCurrentButtonDefinitions.add(ButtonDefinition(98, R.drawable.ic_paid, R.drawable.ic_paid_filled, R.string.buy, canToggle = false, { it.currentMain is BuyFragment }, { it.navigate<BuyFragment>(withHistory = true) }))
+            }
 
             //Add conditional buttons here, when you add a conditional button, be sure to add the register and unregister events for when the button needs to be updated
 
@@ -342,16 +376,29 @@ class MenuBottomBarFragment : MainActivityFragment() {
 
         fun newInstance() = MenuBottomBarFragment().apply { }
 
+        @UnstableApi
         //Add configurable buttons here
         var buttonDefinitions = listOf(
-            ButtonDefinition(0, R.drawable.ic_home, R.drawable.ic_home_filled, R.string.home, canToggle = true, { it.currentMain is HomeFragment }, { it.navigate<HomeFragment>() }),
-            ButtonDefinition(1, R.drawable.ic_subscriptions, R.drawable.ic_subscriptions_filled, R.string.subscriptions, canToggle = true, { it.currentMain is SubscriptionsFeedFragment }, { it.navigate<SubscriptionsFeedFragment>() }),
-            ButtonDefinition(2, R.drawable.ic_creators, R.drawable.ic_creators_filled, R.string.creators, canToggle = false, { it.currentMain is CreatorsFragment }, { it.navigate<CreatorsFragment>() }),
-            ButtonDefinition(3, R.drawable.ic_sources, R.drawable.ic_sources_filled, R.string.sources, canToggle = false, { it.currentMain is SourcesFragment }, { it.navigate<SourcesFragment>() }),
-            ButtonDefinition(4, R.drawable.ic_playlist, R.drawable.ic_playlist_filled, R.string.playlists, canToggle = false, { it.currentMain is PlaylistsFragment }, { it.navigate<PlaylistsFragment>() }),
-            ButtonDefinition(5, R.drawable.ic_history, R.drawable.ic_history, R.string.history, canToggle = false, { it.currentMain is HistoryFragment }, { it.navigate<HistoryFragment>() }),
-            ButtonDefinition(6, R.drawable.ic_download, R.drawable.ic_download, R.string.downloads, canToggle = false, { it.currentMain is DownloadsFragment }, { it.navigate<DownloadsFragment>() }),
-            ButtonDefinition(7, R.drawable.ic_settings, R.drawable.ic_settings, R.string.settings, canToggle = false, { false }, {
+            ButtonDefinition(0, R.drawable.ic_home, R.drawable.ic_home_filled, R.string.home, canToggle = true, { it.currentMain is HomeFragment }, {
+                val currentMain = it.currentMain
+                if (currentMain is HomeFragment) {
+                    currentMain.scrollToTop(false)
+                    currentMain.reloadFeed()
+                } else {
+                    it.navigate<HomeFragment>(withHistory = false)
+                }
+            }),
+            ButtonDefinition(1, R.drawable.ic_subscriptions, R.drawable.ic_subscriptions_filled, R.string.subscriptions, canToggle = true, { it.currentMain is SubscriptionsFeedFragment }, { it.navigate<SubscriptionsFeedFragment>(withHistory = false) }),
+            ButtonDefinition(2, R.drawable.ic_creators, R.drawable.ic_creators_filled, R.string.creators, canToggle = false, { it.currentMain is CreatorsFragment }, { it.navigate<CreatorsFragment>(withHistory = false) }),
+            ButtonDefinition(3, R.drawable.ic_sources, R.drawable.ic_sources_filled, R.string.sources, canToggle = false, { it.currentMain is SourcesFragment }, { it.navigate<SourcesFragment>(withHistory = false) }),
+            ButtonDefinition(4, R.drawable.ic_playlist, R.drawable.ic_playlist_filled, R.string.playlists, canToggle = false, { it.currentMain is PlaylistsFragment }, { it.navigate<PlaylistsFragment>(withHistory = false) }),
+            ButtonDefinition(11, R.drawable.ic_smart_display, R.drawable.ic_smart_display_filled, R.string.shorts, canToggle = true, { it.currentMain is ShortsFragment && !(it.currentMain as ShortsFragment).isChannelShortsMode }, { it.navigate<ShortsFragment>(withHistory = false) }),
+            ButtonDefinition(5, R.drawable.ic_history, R.drawable.ic_history, R.string.history, canToggle = false, { it.currentMain is HistoryFragment }, { it.navigate<HistoryFragment>(withHistory = false) }),
+            ButtonDefinition(6, R.drawable.ic_download, R.drawable.ic_download, R.string.downloads, canToggle = false, { it.currentMain is DownloadsFragment }, { it.navigate<DownloadsFragment>(withHistory = false) }),
+            ButtonDefinition(8, R.drawable.ic_chat, R.drawable.ic_chat_filled, R.string.comments, canToggle = true, { it.currentMain is CommentsFragment }, { it.navigate<CommentsFragment>(withHistory = false) }),
+            ButtonDefinition(9, R.drawable.ic_subscriptions, R.drawable.ic_subscriptions_filled, R.string.subscription_group_menu, canToggle = true, { it.currentMain is SubscriptionGroupListFragment }, { it.navigate<SubscriptionGroupListFragment>(withHistory = false) }),
+            ButtonDefinition(10, R.drawable.ic_help_square, R.drawable.ic_help_square_fill, R.string.tutorials, canToggle = true, { it.currentMain is TutorialFragment }, { it.navigate<TutorialFragment>(withHistory = false) }),
+            ButtonDefinition(7, R.drawable.ic_settings, R.drawable.ic_settings_filled, R.string.settings, canToggle = false, { false }, {
                 val c = it.context ?: return@ButtonDefinition;
                 Logger.i(TAG, "settings preventPictureInPicture()");
                 it.requireFragment<VideoDetailFragment>().preventPictureInPicture();
@@ -360,8 +407,22 @@ class MenuBottomBarFragment : MainActivityFragment() {
                 if (c is Activity) {
                     c.overridePendingTransition(R.anim.slide_in_up, R.anim.slide_darken);
                 }
+            }),
+            ButtonDefinition(96, R.drawable.ic_disabled_visible, R.drawable.ic_disabled_visible, R.string.privacy_mode, canToggle = true, { false }, {
+                UIDialogs.showDialog(it.context ?: return@ButtonDefinition, R.drawable.ic_disabled_visible_purple, "Privacy Mode",
+                    "All requests will be processed anonymously (any logins will be disabled except for the personalized home page), local playback and history tracking will also be disabled.\n\nTap the icon to disable.", null, 0,
+                    UIDialogs.Action("Cancel", {
+                        StateApp.instance.setPrivacyMode(false);
+                    }, UIDialogs.ActionStyle.NONE),
+                    UIDialogs.Action("Enable", {
+                        StateApp.instance.setPrivacyMode(true);
+                    }, UIDialogs.ActionStyle.PRIMARY));
+            }),
+            ButtonDefinition(97, R.drawable.ic_quiz, R.drawable.ic_quiz_fill, R.string.faq, canToggle = true, { false }, {
+                it.navigate<BrowserFragment>(Settings.URL_FAQ, withHistory = false);
             })
-            //98 is reversed for buy button
+            //96 is reserved for privacy button
+            //98 is reserved for buy button
             //99 is reserved for more button
         );
     }

@@ -3,8 +3,7 @@ package com.futo.platformplayer.others
 import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import com.futo.platformplayer.api.media.platforms.js.SourceAuth
+import com.futo.platformplayer.getSubdomainWildcardQuery
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.matchesDomain
 
@@ -33,13 +32,15 @@ class WebViewRequirementExtractor {
     }
 
 
-    fun handleRequest(view: WebView?, request: WebResourceRequest, logVerbose: Boolean = false): ExtractedData? {
+    fun handleRequest(request: WebResourceRequest, logVerbose: Boolean = false): ExtractedData? {
 
         val domain = request.url.host;
         val domainLower = request.url.host?.lowercase();
-        if(completionUrl == null)
+        if (completionUrl == null) {
             urlFound = true;
-        else urlFound = urlFound || request.url == Uri.parse(completionUrl);
+        } else {
+            urlFound = urlFound || request.url == Uri.parse(completionUrl)
+        }
 
         //HEADERS
         if(domainLower != null) {
@@ -64,9 +65,9 @@ class WebViewRequirementExtractor {
         //TODO: For now we assume cookies are legit for all subdomains of a top-level domain, this is the most common scenario anyway
         val cookieString = CookieManager.getInstance().getCookie(request.url.toString());
         if(cookieString != null) {
-            val domainParts = domain!!.split(".");
-            val cookieDomain = "." + domainParts.drop(domainParts.size - 2).joinToString(".");
-            if(allowedUrls.any { it == "everywhere" || it.lowercase().matchesDomain(cookieDomain) })
+            //val domainParts = domain!!.split(".");
+            val cookieDomain = domain!!.getSubdomainWildcardQuery()//"." + domainParts.drop(domainParts.size - 2).joinToString(".");
+            if(allowedUrls.any { it == "everywhere" || domain.matchesDomain(it) })
                 cookiesToFind?.let { cookiesToFind ->
                     val cookies = cookieString.split(";");
                     for(cookieStr in cookies) {

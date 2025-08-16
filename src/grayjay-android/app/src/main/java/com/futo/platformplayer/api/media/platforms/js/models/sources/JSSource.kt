@@ -1,55 +1,100 @@
 package com.futo.platformplayer.api.media.platforms.js.models.sources
 
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import com.caoccao.javet.values.V8Value
 import com.caoccao.javet.values.reference.V8ValueObject
+import com.futo.platformplayer.api.media.models.modifier.AdhocRequestModifier
+import com.futo.platformplayer.api.media.models.modifier.IRequestModifier
 import com.futo.platformplayer.api.media.models.streams.sources.IAudioSource
 import com.futo.platformplayer.api.media.models.streams.sources.IVideoSource
+import com.futo.platformplayer.api.media.platforms.js.JSClient
+import com.futo.platformplayer.api.media.platforms.js.models.JSRequest
+import com.futo.platformplayer.api.media.platforms.js.models.JSRequestExecutor
 import com.futo.platformplayer.api.media.platforms.js.models.JSRequestModifier
 import com.futo.platformplayer.engine.IV8PluginConfig
 import com.futo.platformplayer.engine.V8Plugin
+import com.futo.platformplayer.ensureIsBusy
+import com.futo.platformplayer.getOrDefault
+import com.futo.platformplayer.invokeV8
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.orNull
 import com.futo.platformplayer.views.video.datasources.JSHttpDataSource
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
-import com.google.android.exoplayer2.upstream.HttpDataSource
 
 abstract class JSSource {
+    protected val _plugin: JSClient;
     protected val _config: IV8PluginConfig;
     protected val _obj: V8ValueObject;
-    private val _hasRequestModifier: Boolean;
+
+    val hasRequestModifier: Boolean;
+    private val _requestModifier: JSRequest?;
+
+    val hasRequestExecutor: Boolean;
+    private val _requestExecutor: JSRequest?;
+
+    val requiresCustomDatasource: Boolean get() {
+        return hasRequestModifier || hasRequestExecutor;
+    }
 
     val type : String;
 
-    constructor(type: String, config: IV8PluginConfig, obj: V8ValueObject) {
-        this._config = config;
+    constructor(type: String, plugin: JSClient, obj: V8ValueObject) {
+        this._plugin = plugin;
+        this._config = plugin.config;
         this._obj = obj;
         this.type = type;
 
-        _hasRequestModifier = obj.has("getRequestModifier");
+        _requestModifier = obj.getOrDefault<V8ValueObject>(_config, "requestModifier", "JSSource.requestModifier", null)?.let {
+            JSRequest(plugin, it, null, null, true);
+        }
+        hasRequestModifier = _requestModifier != null || obj.has("getRequestModifier");
+
+        _requestExecutor = obj.getOrDefault<V8ValueObject>(_config, "requestExecutor", "JSSource.requestExecutor", null)?.let {
+            JSRequest(plugin, it, null, null, true);
+        }
+        hasRequestExecutor = _requestExecutor != null || obj.has("getRequestExecutor");
     }
 
-    fun getRequestModifier(): JSRequestModifier? {
-        if (!_hasRequestModifier || _obj.isClosed) {
-            return null;
-        }
+    fun getRequestModifier(): IRequestModifier? = _plugin.isBusyWith("getRequestModifier") {
+        if(_requestModifier != null)
+            return@isBusyWith AdhocRequestModifier { url, headers ->
+                  return@AdhocRequestModifier _requestModifier.modify(_plugin, url, headers);
+            };
+
+        if (!hasRequestModifier || _obj.isClosed)
+            return@isBusyWith null;
 
         val result = V8Plugin.catchScriptErrors<Any>(_config, "[${_config.name}] JSVideoUrlSource", "obj.getRequestModifier()") {
-            _obj.invoke("getRequestModifier", arrayOf<Any>());
+            _obj.invokeV8("getRequestModifier", arrayOf<Any>());
         };
 
-        if (result !is V8ValueObject) {
-            return null;
-        }
+        if (result !is V8ValueObject)
+            return@isBusyWith null;
 
-        return JSRequestModifier(_config, result)
+        return@isBusyWith JSRequestModifier(_plugin, result)
+    }
+    open fun getRequestExecutor(): JSRequestExecutor? = _plugin.isBusyWith("getRequestExecutor") {
+        if (!hasRequestExecutor || _obj.isClosed)
+            return@isBusyWith null;
+
+        Logger.v("JSSource", "Request executor for [${type}] requesting");
+        val result = V8Plugin.catchScriptErrors<Any>(_config, "[${_config.name}] JSSource", "obj.getRequestExecutor()") {
+            _obj.invokeV8("getRequestExecutor", arrayOf<Any>());
+        };
+
+        Logger.v("JSSource", "Request executor for [${type}] received");
+
+        if (result !is V8ValueObject)
+            return@isBusyWith null;
+
+        return@isBusyWith JSRequestExecutor(_plugin, result)
     }
 
-    fun getHttpDataSourceFactory(): HttpDataSource.Factory {
-        val requestModifier = getRequestModifier();
-        return if (requestModifier != null) {
-            JSHttpDataSource.Factory().setRequestModifier(requestModifier);
-        } else {
-            DefaultHttpDataSource.Factory();
-        }
+    fun getUnderlyingPlugin(): JSClient? {
+        return _plugin;
+    }
+    fun getUnderlyingObject(): V8ValueObject? {
+        return _obj;
     }
 
     companion object {
@@ -58,31 +103,66 @@ abstract class JSSource {
         const val TYPE_AUDIO_WITH_METADATA = "AudioUrlRangeSource";
         const val TYPE_VIDEO_WITH_METADATA = "VideoUrlRangeSource";
         const val TYPE_DASH = "DashSource";
+        const val TYPE_DASH_WIDEVINE = "DashWidevineSource";
+        const val TYPE_DASH_RAW = "DashRawSource";
+        const val TYPE_DASH_RAW_AUDIO = "DashRawAudioSource";
         const val TYPE_HLS = "HLSSource";
+        const val TYPE_AUDIOURL_WIDEVINE = "AudioUrlWidevineSource"
+        const val TYPE_VIDEOURL_WIDEVINE = "VideoUrlWidevineSource"
 
-        fun fromV8VideoNullable(config: IV8PluginConfig, obj: V8Value?) : IVideoSource? = obj.orNull { fromV8Video(config, it as V8ValueObject) };
-        fun fromV8Video(config: IV8PluginConfig, obj: V8ValueObject) : IVideoSource {
+        fun fromV8VideoNullable(plugin: JSClient, obj: V8Value?) : IVideoSource? {
+            obj?.ensureIsBusy();
+            return obj.orNull { fromV8Video(plugin, it as V8ValueObject) }
+        };
+        fun fromV8Video(plugin: JSClient, obj: V8ValueObject) : IVideoSource? {
+            obj.ensureIsBusy()
             val type = obj.getString("plugin_type");
             return when(type) {
-                TYPE_VIDEOURL -> JSVideoUrlSource(config, obj);
-                TYPE_VIDEO_WITH_METADATA -> JSVideoUrlRangeSource(config, obj);
-                TYPE_HLS -> fromV8HLS(config, obj);
-                TYPE_DASH -> fromV8Dash(config, obj);
-                else -> throw NotImplementedError("Unknown type ${type}");
+                TYPE_VIDEOURL -> JSVideoUrlSource(plugin, obj);
+                TYPE_VIDEOURL_WIDEVINE -> JSVideoUrlWidevineSource(plugin, obj);
+                TYPE_VIDEO_WITH_METADATA -> JSVideoUrlRangeSource(plugin, obj);
+                TYPE_HLS -> fromV8HLS(plugin, obj);
+                TYPE_DASH_WIDEVINE -> JSDashManifestWidevineSource(plugin, obj)
+                TYPE_DASH -> fromV8Dash(plugin, obj);
+                TYPE_DASH_RAW -> fromV8DashRaw(plugin, obj);
+                else -> {
+                    Logger.w("JSSource", "Unknown video type ${type}");
+                    null;
+                };
             }
         }
-        fun fromV8DashNullable(config: IV8PluginConfig, obj: V8Value?) : JSDashManifestSource? = obj.orNull { fromV8Dash(config, it as V8ValueObject) };
-        fun fromV8Dash(config: IV8PluginConfig, obj: V8ValueObject) : JSDashManifestSource = JSDashManifestSource(config, obj);
-        fun fromV8HLSNullable(config: IV8PluginConfig, obj: V8Value?) : JSHLSManifestSource? = obj.orNull { fromV8HLS(config, it as V8ValueObject) };
-        fun fromV8HLS(config: IV8PluginConfig, obj: V8ValueObject) : JSHLSManifestSource = JSHLSManifestSource(config, obj);
+        fun fromV8DashNullable(plugin: JSClient, obj: V8Value?) : JSDashManifestSource? = obj.orNull { fromV8Dash(plugin, it as V8ValueObject) };
+        fun fromV8Dash(plugin: JSClient, obj: V8ValueObject) : JSDashManifestSource{
+            obj.ensureIsBusy();
+            return JSDashManifestSource(plugin, obj)
+        };
+        fun fromV8DashRaw(plugin: JSClient, obj: V8ValueObject) : JSDashManifestRawSource{
+            obj.ensureIsBusy()
+            return JSDashManifestRawSource(plugin, obj);
+        }
+        fun fromV8DashRawAudio(plugin: JSClient, obj: V8ValueObject) : JSDashManifestRawAudioSource {
+            obj?.ensureIsBusy();
+            return JSDashManifestRawAudioSource(plugin, obj)
+        };
+        fun fromV8HLSNullable(plugin: JSClient, obj: V8Value?) : JSHLSManifestSource? = obj.orNull { fromV8HLS(plugin, it as V8ValueObject) };
+        fun fromV8HLS(plugin: JSClient, obj: V8ValueObject) : JSHLSManifestSource {
+            obj.ensureIsBusy();
+            return JSHLSManifestSource(plugin, obj)
+        };
 
-        fun fromV8Audio(config: IV8PluginConfig, obj: V8ValueObject) : IAudioSource {
+        fun fromV8Audio(plugin: JSClient, obj: V8ValueObject) : IAudioSource? {
+            obj.ensureIsBusy();
             val type = obj.getString("plugin_type");
             return when(type) {
-                TYPE_HLS -> JSHLSManifestAudioSource.fromV8HLS(config, obj);
-                TYPE_AUDIOURL -> JSAudioUrlSource(config, obj);
-                TYPE_AUDIO_WITH_METADATA -> JSAudioUrlRangeSource(config, obj);
-                else -> throw NotImplementedError("Unknown type ${type}");
+                TYPE_HLS -> JSHLSManifestAudioSource.fromV8HLS(plugin, obj);
+                TYPE_AUDIOURL -> JSAudioUrlSource(plugin, obj);
+                TYPE_DASH_RAW_AUDIO -> fromV8DashRawAudio(plugin, obj);
+                TYPE_AUDIOURL_WIDEVINE -> JSAudioUrlWidevineSource(plugin, obj);
+                TYPE_AUDIO_WITH_METADATA -> JSAudioUrlRangeSource(plugin, obj);
+                else -> {
+                    Logger.w("JSSource", "Unknown audio type ${type}");
+                    null;
+                };
             }
         }
     }

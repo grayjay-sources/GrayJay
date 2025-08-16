@@ -1,5 +1,6 @@
 package com.futo.platformplayer.views.adapters.viewholders
 
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.ImageButton
@@ -7,12 +8,16 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.futo.platformplayer.*
+import com.futo.platformplayer.activities.MainActivity
 import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.downloads.VideoLocal
 import com.futo.platformplayer.images.GlideHelper.Companion.loadThumbnails
+import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.states.StateDownloads
 import com.futo.platformplayer.states.StatePlayer
 import com.futo.platformplayer.views.adapters.AnyAdapter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 
 class VideoDownloadViewHolder(_viewGroup: ViewGroup) : AnyAdapter.AnyViewHolder<VideoLocal>(
@@ -47,30 +52,45 @@ class VideoDownloadViewHolder(_viewGroup: ViewGroup) : AnyAdapter.AnyViewHolder<
         }
         _videoExport.setOnClickListener {
             val v = _video ?: return@setOnClickListener;
-            StateDownloads.instance.export(v, v.videoSource.firstOrNull(), v.audioSource.firstOrNull(), v.subtitlesSources.firstOrNull());
+            if (StateApp.instance.getExternalDownloadDirectory(_view.context) == null) {
+                StateApp.instance.changeExternalDownloadDirectory(_view.context as MainActivity) {
+                    if (it == null) {
+                        UIDialogs.toast(_view.context, "Download directory must be set to export.");
+                        return@changeExternalDownloadDirectory;
+                    }
+
+                    StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                        StateDownloads.instance.export(_viewGroup.context, v, v.videoSource.firstOrNull(), v.audioSource.firstOrNull(), v.subtitlesSources.firstOrNull());
+                    }
+                };
+            } else {
+                StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                    StateDownloads.instance.export(_viewGroup.context, v, v.videoSource.firstOrNull(), v.audioSource.firstOrNull(), v.subtitlesSources.firstOrNull());
+                }
+            }
         }
     }
 
-    override fun bind(video: VideoLocal) {
-        _video = video;
-        _videoName.text = video.name;
-        _videoDuration.text = video.duration.toHumanTime(false);
-        _videoAuthor.text = video.author.name;
-        _videoSize.text = (video.videoSource.sumOf { it.fileSize } + video.audioSource.sumOf { it.fileSize }).toHumanBytesSize(false);
+    @SuppressLint("SetTextI18n")
+    override fun bind(value: VideoLocal) {
+        _video = value;
+        _videoName.text = value.name;
+        _videoDuration.text = value.duration.toHumanTime(false);
+        _videoAuthor.text = value.author.name;
+        _videoSize.text = (value.videoSource.sumOf { it.fileSize } + value.audioSource.sumOf { it.fileSize }).toHumanBytesSize(false);
 
         val tokens = arrayListOf<String>();
-
-        if(video.videoSource.isNotEmpty()) {
-            tokens.add(video.videoSource.maxBy { it.width * it.height }.let { "${it.width}x${it.height} (${it.container})" });
+        if(value.videoSource.isNotEmpty()) {
+            tokens.add(value.videoSource.maxBy { it.width * it.height }.let { "${it.width}x${it.height} (${it.container})" });
         }
 
-        if (video.audioSource.isNotEmpty()) {
-            tokens.add(video.audioSource.maxBy { it.bitrate }.let { it.bitrate.toHumanBitrate() });
+        if (value.audioSource.isNotEmpty()) {
+            tokens.add(value.audioSource.maxBy { it.bitrate }.let { it.bitrate.toHumanBitrate() });
         }
 
-        _videoInfo.text =tokens.joinToString(" • ");
+        _videoInfo.text = tokens.joinToString(" • ");
 
-        _videoImage.loadThumbnails(video.thumbnails, true) {
+        _videoImage.loadThumbnails(value.thumbnails, true) {
             it.placeholder(R.drawable.placeholder_video_thumbnail)
                 .into(_videoImage);
         };

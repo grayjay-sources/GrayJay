@@ -1,14 +1,16 @@
 package com.futo.platformplayer.api.media.platforms.js
 
 import android.content.Context
-import com.futo.platformplayer.states.StateDeveloper
 import com.futo.platformplayer.api.media.models.channels.IPlatformChannel
 import com.futo.platformplayer.api.media.models.comments.IPlatformComment
 import com.futo.platformplayer.api.media.models.contents.IPlatformContent
 import com.futo.platformplayer.api.media.models.contents.IPlatformContentDetails
 import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.states.StateApp
-import java.util.*
+import com.futo.platformplayer.states.StateDeveloper
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.util.UUID
 
 class DevJSClient : JSClient {
     override val id: String
@@ -20,14 +22,14 @@ class DevJSClient : JSClient {
 
     val devID: String;
 
-    constructor(context: Context, config: SourcePluginConfig, script: String, auth: SourceAuth? = null, captcha: SourceCaptchaData? = null, devID: String? = null): super(context, SourcePluginDescriptor(config, auth?.toEncrypted(), captcha?.toEncrypted(), listOf("DEV")), null, script) {
+    constructor(context: Context, config: SourcePluginConfig, script: String, auth: SourceAuth? = null, captcha: SourceCaptchaData? = null, devID: String? = null, settings: HashMap<String, String?>? = null): super(context, SourcePluginDescriptor(config, auth?.toEncrypted(), captcha?.toEncrypted(), listOf("DEV"), settings), null, script) {
         _devScript = script;
         _auth = auth;
         _captcha = captcha;
         this.devID = devID ?: UUID.randomUUID().toString().substring(0, 5);
 
-        onCaptchaException.subscribe { client, captcha ->
-            StateApp.instance.handleCaptchaException(client, captcha);
+        onCaptchaException.subscribe { client, c ->
+            StateApp.instance.handleCaptchaException(client, c);
         }
     }
     //TODO: Misisng auth/captcha pass on purpose?
@@ -37,8 +39,8 @@ class DevJSClient : JSClient {
         _captcha = captcha;
         this.devID = devID ?: UUID.randomUUID().toString().substring(0, 5);
 
-        onCaptchaException.subscribe { client, captcha ->
-            StateApp.instance.handleCaptchaException(client, captcha);
+        onCaptchaException.subscribe { client, c ->
+            StateApp.instance.handleCaptchaException(client, c);
         }
     }
 
@@ -49,11 +51,15 @@ class DevJSClient : JSClient {
         _auth = auth;
     }
     fun recreate(context: Context): DevJSClient {
-        return DevJSClient(context, config, _devScript, _auth, _captcha, devID);
+        return DevJSClient(context, config, _devScript, _auth, _captcha, devID, descriptor.settings);
     }
 
-    override fun getCopy(): JSClient {
-        return DevJSClient(_context, descriptor, _script, _auth, _captcha, saveState(), devID);
+    override fun getCopy(privateCopy: Boolean, noSaveState: Boolean): JSClient {
+        val client = DevJSClient(_context, descriptor, _script, if(!privateCopy) _auth else null, _captcha, if (noSaveState) null else saveState(), devID);
+        client.setReloadData(getReloadData(true));
+        if (noSaveState)
+            client.initialize()
+        return client
     }
 
     override fun initialize() {
@@ -115,7 +121,7 @@ class DevJSClient : JSClient {
 
     //Video
     override fun isContentDetailsUrl(url: String): Boolean {
-        return StateDeveloper.instance.handleDevCall(devID, "isVideoDetailsUrl"){
+        return StateDeveloper.instance.handleDevCall(devID, "isVideoDetailsUrl(${Json.encodeToString(url)})"){
             super.isContentDetailsUrl(url);
         };
     }

@@ -46,10 +46,9 @@
             app:layout_constraintLeft_toRightOf="@id/ic_viewers"
             tools:text="1536 viewers"/>
 
-        <ScrollView
+        <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="35dp"
-            android:orientation="horizontal"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintLeft_toLeftOf="parent"
             app:layout_constraintRight_toRightOf="parent">
@@ -61,12 +60,13 @@
                 android:layout_height="match_parent">
 
             </LinearLayout>
-        </ScrollView>
+        </HorizontalScrollView>
 
         <ImageView
             android:id="@+id/button_close"
             android:layout_width="40dp"
             android:layout_height="40dp"
+            android:contentDescription="@string/cd_button_close"
             app:layout_constraintRight_toRightOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             android:layout_margin="7dp"
@@ -127,6 +127,7 @@
                 android:scaleType="fitCenter"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:contentDescription="@string/cd_creator_thumbnail"
                 app:layout_constraintLeft_toLeftOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
                 android:layout_margin="20dp"
@@ -160,6 +161,7 @@
                     android:id="@+id/donation_amount"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:contentDescription="@string/cd_donation_amount"
                     android:gravity="center"
                     tools:text="$100" />
             </LinearLayout>
@@ -230,6 +232,7 @@
                 android:scaleType="fitCenter"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                android:contentDescription="@string/cd_creator_thumbnail"
                 android:layout_marginEnd="10dp"
                 android:layout_marginStart="-20dp"
                 android:src="@drawable/placeholder_profile" />
@@ -260,8 +263,8 @@
                 android:textSize="13dp"
                 android:letterSpacing="0"
                 android:fontFamily="@font/inter_regular"
-                android:layout_marginStart="20dp"
-                android:backgroundTint="#2F2F2F"
+                android:layout_marginStart="5dp"
+                android:backgroundTint="@color/colorPrimary"
                 android:layout_marginEnd="5dp"
                 android:text="@string/go_now"/>
             <Button
@@ -274,9 +277,9 @@
                 android:textSize="13dp"
                 android:letterSpacing="0"
                 android:layout_marginStart="5dp"
-                android:layout_marginEnd="20dp"
-                android:backgroundTint="#481414"
-                android:text="@string/prevent"/>
+                android:layout_marginEnd="5dp"
+                android:backgroundTint="#2F2F2F"
+                android:text="@string/dismiss"/>
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

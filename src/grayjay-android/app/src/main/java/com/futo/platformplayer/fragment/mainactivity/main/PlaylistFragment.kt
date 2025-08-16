@@ -1,18 +1,15 @@
 package com.futo.platformplayer.fragment.mainactivity.main
 
 import android.annotation.SuppressLint
-import android.graphics.drawable.Animatable
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.app.ShareCompat
-import androidx.core.view.setPadding
 import androidx.lifecycle.lifecycleScope
 import com.futo.platformplayer.*
+import com.futo.platformplayer.activities.IWithResultLauncher
 import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylist
-import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylistDetails
 import com.futo.platformplayer.api.media.models.video.IPlatformVideo
 import com.futo.platformplayer.api.media.models.video.SerializedPlatformVideo
 import com.futo.platformplayer.constructs.TaskHandler
@@ -30,7 +27,6 @@ import com.futo.platformplayer.views.overlays.slideup.SlideUpMenuOverlay
 import com.futo.platformplayer.views.overlays.slideup.SlideUpMenuTextInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class PlaylistFragment : MainFragment() {
     override val isMainView : Boolean = true;
@@ -41,7 +37,7 @@ class PlaylistFragment : MainFragment() {
 
     override fun onShownWithView(parameter: Any?, isBack: Boolean) {
         super.onShownWithView(parameter, isBack);
-        _view?.onShown(parameter, isBack);
+        _view?.onShown(parameter);
     }
 
     override fun onCreateMainView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -70,18 +66,25 @@ class PlaylistFragment : MainFragment() {
         private val _fragment: PlaylistFragment;
 
         private var _playlist: Playlist? = null;
-        private var _remotePlaylist: IPlatformPlaylistDetails? = null;
         private var _editPlaylistNameInput: SlideUpMenuTextInput? = null;
         private var _editPlaylistOverlay: SlideUpMenuOverlay? = null;
         private var _url: String? = null;
 
-        private val _taskLoadPlaylist: TaskHandler<String, IPlatformPlaylistDetails>;
+        private val _taskLoadPlaylist: TaskHandler<String, Playlist>;
 
         constructor(fragment: PlaylistFragment, inflater: LayoutInflater) : super(inflater) {
             _fragment = fragment;
 
             val nameInput = SlideUpMenuTextInput(context, context.getString(R.string.name));
             val editPlaylistOverlay = SlideUpMenuOverlay(context, overlayContainer, context.getString(R.string.edit_playlist), context.getString(R.string.ok), false, nameInput);
+
+            _buttonExport.setOnClickListener {
+                _playlist?.let {
+                    val context = StateApp.instance.contextOrNull ?: return@let;
+                    if(context is IWithResultLauncher)
+                        StateDownloads.instance.exportPlaylist(context, it.id);
+                }
+            };
 
             _buttonDownload.visibility = View.VISIBLE;
             editPlaylistOverlay.onOK.subscribe {
@@ -114,101 +117,137 @@ class PlaylistFragment : MainFragment() {
                 val reconstruction = StatePlaylists.instance.playlistStore.getReconstructionString(playlist);
 
                 UISlideOverlays.showOverlay(overlayContainer, context.getString(R.string.playlist) + " [${playlist.name}]", null, {},
-                    SlideUpMenuItem(context, R.drawable.ic_list, context.getString(R.string.share_as_text), context.getString(R.string.share_as_a_list_of_video_urls), 1, {
-                        _fragment.startActivity(ShareCompat.IntentBuilder(context)
-                            .setType("text/plain")
-                            .setText(reconstruction)
-                            .intent);
-                    }),
-                    SlideUpMenuItem(context, R.drawable.ic_move_up, context.getString(R.string.share_as_import), context.getString(R.string.share_as_a_import_file_for_grayjay), 2, {
-                        val shareUri = StatePlaylists.instance.createPlaylistShareJsonUri(context, playlist);
-                        _fragment.startActivity(ShareCompat.IntentBuilder(context)
-                            .setType("application/json")
-                            .setStream(shareUri)
-                            .intent);
-                    })
+                    SlideUpMenuItem(
+                        context,
+                        R.drawable.ic_list,
+                        context.getString(R.string.share_as_text),
+                        context.getString(R.string.share_as_a_list_of_video_urls),
+                        tag = 1,
+                        call = {
+                            _fragment.startActivity(ShareCompat.IntentBuilder(context)
+                                .setType("text/plain")
+                                .setText(reconstruction)
+                                .intent);
+                        }),
+                    SlideUpMenuItem(
+                        context,
+                        R.drawable.ic_move_up,
+                        context.getString(R.string.share_as_import),
+                        context.getString(R.string.share_as_a_import_file_for_grayjay),
+                        tag = 2,
+                        call = {
+                            val shareUri = StatePlaylists.instance.createPlaylistShareJsonUri(context, playlist);
+                            _fragment.startActivity(ShareCompat.IntentBuilder(context)
+                                .setType("application/json")
+                                .setStream(shareUri)
+                                .intent);
+                        })
                 );
             };
 
-            _taskLoadPlaylist = TaskHandler<String, IPlatformPlaylistDetails>(
+            _taskLoadPlaylist = TaskHandler<String, Playlist>(
                 StateApp.instance.scopeGetter,
                 {
-                    return@TaskHandler StatePlatform.instance.getPlaylist(it);
+                    return@TaskHandler StatePlatform.instance.getPlaylist(it).toPlaylist();
                 })
                 .success {
-                    setLoading(false);
-                    _remotePlaylist = it;
                     setName(it.name);
-                    setVideos(it.contents.getResults(), false);
-                    setVideoCount(it.videoCount);
                     //TODO: Implement support for pagination
+                    setVideos(it.videos, false);
+                    setMetadata(it.videos.size, it.videos.sumOf { it.duration });
+                    setLoading(false);
                 }
                 .exception<Throwable> {
                     Logger.w(TAG, "Failed to load playlist.", it);
                     val c = context ?: return@exception;
-                    UIDialogs.showGeneralRetryErrorDialog(c, context.getString(R.string.failed_to_load_playlist), it, ::fetchPlaylist);
+                    UIDialogs.showGeneralRetryErrorDialog(c, context.getString(R.string.failed_to_load_playlist), it, ::fetchPlaylist, null, fragment);
                 };
         }
 
-        fun onShown(parameter: Any ?, isBack: Boolean) {
-            _taskLoadPlaylist.cancel();
+        private fun savePlaylist(playlist: Playlist) {
+            StatePlaylists.instance.playlistStore.save(playlist)
+            UIDialogs.toast("Playlist saved")
+        }
+
+        private fun copyPlaylist(playlist: Playlist) {
+            var copyNumber = 1
+            var newName = "${playlist.name} (Copy)"
+            val playlists = StatePlaylists.instance.playlistStore.getItems()
+            while (playlists.any { it.name == newName }) {
+                copyNumber += 1
+                newName = "${playlist.name} (Copy $copyNumber)"
+            }
+            StatePlaylists.instance.playlistStore.save(playlist.makeCopy(newName))
+            _fragment.navigate<PlaylistsFragment>(withHistory = false)
+            UIDialogs.toast("Playlist copied")
+        }
+
+        fun onShown(parameter: Any?) {
+            _taskLoadPlaylist.cancel()
 
             if (parameter is Playlist?) {
-                _playlist = parameter;
-                _remotePlaylist = null;
-                _url = null;
+                _playlist = parameter
+                _url = null
 
-                if(parameter != null) {
-                    setName(parameter.name);
-                    setVideos(parameter.videos, true);
-                    setVideoCount(parameter.videos.size);
-                    setButtonDownloadVisible(true);
-                    setButtonEditVisible(true);
+                if (parameter != null) {
+                    setName(parameter.name)
+                    setVideos(parameter.videos, true)
+                    setMetadata(parameter.videos.size, parameter.videos.sumOf { it.duration })
+                    setButtonDownloadVisible(true)
+                    setButtonExportVisible(false)
+                    setButtonEditVisible(true)
+
+                    _fragment.topBar?.assume<NavigationTopBarFragment>()
+                        ?.setMenuItems(arrayListOf(Pair(R.drawable.ic_copy) {
+                            if (StatePlaylists.instance.playlistStore.hasItem { it.id == parameter.id }) {
+                                copyPlaylist(parameter)
+                            } else {
+                                savePlaylist(parameter)
+                            }
+                        }))
                 } else {
-                    setName(null);
-                    setVideos(null, false);
-                    setVideoCount(-1);
-                    setButtonDownloadVisible(false);
-                    setButtonEditVisible(false);
+                    setName(null)
+                    setVideos(null, false)
+                    setMetadata(-1, -1);
+                    setButtonDownloadVisible(false)
+                    setButtonEditVisible(false)
                 }
-
-                //TODO: Do I have to remove the showConvertPlaylistButton(); button here?
             } else if (parameter is IPlatformPlaylist) {
-                _playlist = null;
-                _remotePlaylist = null;
-                _url = parameter.url;
+                _playlist = null
+                _url = parameter.url
 
-                setVideoCount(parameter.videoCount);
-                setName(parameter.name);
-                setVideos(null, false);
-                setButtonDownloadVisible(false);
-                setButtonEditVisible(false);
+                setMetadata(parameter.videoCount, -1);
+                setName(parameter.name)
+                setVideos(null, false)
+                setButtonDownloadVisible(false)
+                setButtonEditVisible(false)
 
-                fetchPlaylist();
-                showConvertPlaylistButton();
+                fetchPlaylist()
             } else if (parameter is String) {
-                _playlist = null;
-                _remotePlaylist = null;
-                _url = parameter;
+                _playlist = null
+                _url = parameter
 
-                setName(null);
-                setVideos(null, false);
-                setVideoCount(-1);
-                setButtonDownloadVisible(false);
-                setButtonEditVisible(false);
+                setName(null)
+                setVideos(null, false)
+                setMetadata(-1, -1);
+                setButtonDownloadVisible(false)
+                setButtonEditVisible(false)
 
-                fetchPlaylist();
-                showConvertPlaylistButton();
+                fetchPlaylist()
             }
 
-            updateDownloadState();
+            _playlist?.let {
+                updateDownloadState(VideoDownload.GROUP_PLAYLIST, it.id, this::download)
+            }
         }
 
         fun onResume() {
             StateDownloads.instance.onDownloadsChanged.subscribe(this) {
                 _fragment.lifecycleScope.launch(Dispatchers.Main) {
                     try {
-                        updateDownloadState();
+                        _playlist?.let {
+                            updateDownloadState(VideoDownload.GROUP_PLAYLIST, it.id, this@PlaylistView::download);
+                        }
                     } catch (e: Throwable) {
                         Logger.e(TAG, "Failed to update download state onDownloadedChanged.")
                     }
@@ -217,7 +256,9 @@ class PlaylistFragment : MainFragment() {
             StateDownloads.instance.onDownloadedChanged.subscribe(this) {
                 _fragment.lifecycleScope.launch(Dispatchers.Main) {
                     try {
-                        updateDownloadState();
+                        _playlist?.let {
+                            updateDownloadState(VideoDownload.GROUP_PLAYLIST, it.id, this@PlaylistView::download);
+                        }
                     } catch (e: Throwable) {
                         Logger.e(TAG, "Failed to update download state onDownloadedChanged.")
                     }
@@ -225,37 +266,24 @@ class PlaylistFragment : MainFragment() {
             };
         }
 
+        private fun download() {
+            val playlist = _playlist ?: return
+            if (!StatePlaylists.instance.playlistStore.hasItem { it.id == playlist.id }) {
+                UIDialogs.showConfirmationDialog(context, "Playlist must be saved to download", {
+                    savePlaylist(playlist)
+                    download()
+                })
+                return
+            }
+
+            _playlist?.let {
+                UISlideOverlays.showDownloadPlaylistOverlay(it, overlayContainer);
+            }
+        }
+
         fun onPause() {
             StateDownloads.instance.onDownloadsChanged.remove(this);
             StateDownloads.instance.onDownloadedChanged.remove(this);
-        }
-
-        private fun showConvertPlaylistButton() {
-            _fragment.topBar?.assume<NavigationTopBarFragment>()?.setMenuItems(arrayListOf(Pair(R.drawable.ic_copy) {
-                val remotePlaylist = _remotePlaylist;
-                if (remotePlaylist == null) {
-                    UIDialogs.toast(context.getString(R.string.please_wait_for_playlist_to_finish_loading));
-                    return@Pair;
-                }
-
-                setLoading(true);
-                StateApp.instance.scopeOrNull?.launch(Dispatchers.IO) {
-                    try {
-                        StatePlaylists.instance.playlistStore.save(remotePlaylist.toPlaylist());
-
-                        withContext(Dispatchers.Main) {
-                            setLoading(false);
-                            UIDialogs.toast(context.getString(R.string.playlist_copied_as_local_playlist));
-                        }
-                    } catch (e: Throwable) {
-                        withContext(Dispatchers.Main) {
-                            setLoading(false);
-                        }
-
-                        throw e;
-                    }
-                }
-            }));
         }
 
         private fun fetchPlaylist() {
@@ -268,68 +296,34 @@ class PlaylistFragment : MainFragment() {
             }
         }
 
-        private fun updateDownloadState() {
-            val playlist = _playlist ?: return;
-            val isDownloading = StateDownloads.instance.getDownloading().any { it.groupType == VideoDownload.GROUP_PLAYLIST && it.groupID == playlist.id };
-            val isDownloaded = StateDownloads.instance.isPlaylistCached(playlist.id);
-
-            val dp10 = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10f, resources.displayMetrics);
-
-            if(isDownloaded && !isDownloading)
-                _buttonDownload.setBackgroundResource(R.drawable.background_button_round_green);
-            else
-                _buttonDownload.setBackgroundResource(R.drawable.background_button_round);
-
-            if(isDownloading) {
-                _buttonDownload.setImageResource(R.drawable.ic_loader_animated);
-                _buttonDownload.drawable.assume<Animatable, Unit> { it.start() };
-                _buttonDownload.setOnClickListener {
-                    UIDialogs.showConfirmationDialog(context, context.getString(R.string.are_you_sure_you_want_to_delete_the_downloaded_videos), {
-                        StateDownloads.instance.deleteCachedPlaylist(playlist.id);
-                    });
-                }
-            }
-            else if(isDownloaded) {
-                _buttonDownload.setImageResource(R.drawable.ic_download_off);
-                _buttonDownload.setOnClickListener {
-                    UIDialogs.showConfirmationDialog(context, context.getString(R.string.are_you_sure_you_want_to_delete_the_downloaded_videos), {
-                        StateDownloads.instance.deleteCachedPlaylist(playlist.id);
-                    });
-                }
-            }
-            else {
-                _buttonDownload.setImageResource(R.drawable.ic_download);
-                _buttonDownload.setOnClickListener {
-                    UISlideOverlays.showDownloadPlaylistOverlay(playlist, overlayContainer);
-                }
-            }
-            _buttonDownload.setPadding(dp10.toInt());
-        }
 
         override fun canEdit(): Boolean { return _playlist != null; }
 
         override fun onEditClick() {
+            val playlist = _playlist ?: return
+            if (!StatePlaylists.instance.playlistStore.hasItem { it.id == playlist.id }) {
+                UIDialogs.showConfirmationDialog(context, "Playlist must be saved to edit the name", {
+                    savePlaylist(playlist)
+                    onEditClick()
+                })
+                return
+            }
+
             _editPlaylistNameInput?.activate();
             _editPlaylistOverlay?.show();
         }
 
         override fun onPlayAllClick() {
             val playlist = _playlist;
-            val remotePlaylist = _remotePlaylist;
             if (playlist != null) {
                 StatePlayer.instance.setPlaylist(playlist, focus = true);
-            } else if (remotePlaylist != null) {
-                StatePlayer.instance.setPlaylist(remotePlaylist, focus = true, shuffle = false);
             }
         }
 
         override fun onShuffleClick() {
             val playlist = _playlist;
-            val remotePlaylist = _remotePlaylist;
             if (playlist != null) {
                 StatePlayer.instance.setPlaylist(playlist, focus = true, shuffle = true);
-            } else if (remotePlaylist != null) {
-                StatePlayer.instance.setPlaylist(remotePlaylist, focus = true, shuffle = true);
             }
         }
 
@@ -343,21 +337,18 @@ class PlaylistFragment : MainFragment() {
             playlist.videos = ArrayList(playlist.videos.filter { it != video });
             StatePlaylists.instance.createOrUpdatePlaylist(playlist);
         }
+
+        override fun onVideoOptions(video: IPlatformVideo) {
+            UISlideOverlays.showVideoOptionsOverlay(video, overlayContainer);
+        }
         override fun onVideoClicked(video: IPlatformVideo) {
             val playlist = _playlist;
-            val remotePlaylist = _remotePlaylist;
             if (playlist != null) {
                 val index = playlist.videos.indexOf(video);
                 if (index == -1)
                     return;
 
                 StatePlayer.instance.setPlaylist(playlist, index, true);
-            } else if (remotePlaylist != null) {
-                val index = remotePlaylist.contents.getResults().indexOf(video);
-                if (index == -1)
-                    return;
-
-                StatePlayer.instance.setPlaylist(remotePlaylist, index, true);
             }
         }
     }

@@ -35,6 +35,12 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
+                    <com.futo.platformplayer.views.announcements.AnnouncementView
+                        android:id="@+id/announcement_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
                     <LinearLayout
                         android:id="@+id/container_sort_by"
                         android:layout_width="match_parent"
@@ -106,6 +112,12 @@
                     android:gravity="center"
                     android:textColor="@color/gray_ac"
                     android:textSize="12dp" />
+                <FrameLayout
+                    android:visibility="gone"
+                    android:id="@+id/empty_pager_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="30dp" />
             </FrameLayout>
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 

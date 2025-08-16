@@ -3,32 +3,48 @@ package com.futo.platformplayer.activities
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.widget.ImageButton
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.futo.platformplayer.*
+import com.futo.platformplayer.R
+import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.api.media.platforms.js.SourceAuth
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginAuthConfig
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.matchesDomain
 import com.futo.platformplayer.others.LoginWebViewClient
+import com.futo.platformplayer.setNavigationBarColorAndIcons
+import com.futo.platformplayer.states.StateApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class LoginActivity : AppCompatActivity() {
     private lateinit var _webView: WebView;
+    private lateinit var _textUrl: TextView;
+    private lateinit var _buttonClose: ImageButton;
 
+    override fun attachBaseContext(newBase: Context?) {
+        super.attachBaseContext(StateApp.instance.getLocaleContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
         setNavigationBarColorAndIcons();
+
+        _textUrl = findViewById(R.id.text_url);
+        _buttonClose = findViewById(R.id.button_close);
+        _buttonClose.setOnClickListener {
+            UIDialogs.toast("Login cancelled", false);
+            finish();
+        }
+
 
         _webView = findViewById(R.id.web_view);
         _webView.settings.javaScriptEnabled = true;
@@ -59,7 +75,10 @@ class LoginActivity : AppCompatActivity() {
             finish();
         };
         var isFirstLoad = true;
+        val loginWarnings = authConfig.loginWarnings?.toMutableList() ?: mutableListOf<SourcePluginAuthConfig.Warning>();
         webViewClient.onPageLoaded.subscribe { view, url ->
+            _textUrl.setText(url ?: "");
+
             if(!isFirstLoad)
                 return@subscribe;
             isFirstLoad = false;
@@ -68,6 +87,19 @@ class LoginActivity : AppCompatActivity() {
                 Logger.i(TAG, "Clicking login button [${authConfig.loginButton}]");
                 //TODO: Find most reliable way to wait for page js to finish
                 view?.evaluateJavascript("setTimeout(()=> document.querySelector(\"${authConfig.loginButton}\")?.click(), 1000)", {});
+            }
+
+            if(loginWarnings.size > 0) {
+                synchronized(loginWarnings) {
+                    val warning = loginWarnings.find { it.url.matches(it.getRegex()) };
+                    if(warning != null) {
+                        if(warning.once == true)
+                            loginWarnings.remove(warning);
+                        UIDialogs.showDialog(this@LoginActivity, R.drawable.ic_warning_yellow, warning.text ?: "", warning.details ?: "", null, 0,
+                            UIDialogs.Action("Understood", {
+                            }, UIDialogs.ActionStyle.PRIMARY));
+                    }
+                }
             }
         }
         _webView.settings.domStorageEnabled = true;
@@ -85,7 +117,7 @@ class LoginActivity : AppCompatActivity() {
 
     override fun finish() {
         lifecycleScope.launch(Dispatchers.Main) {
-            _webView?.loadUrl("about:blank");
+            _webView.loadUrl("about:blank");
         }
         _callback?.let {
             _callback = null;
@@ -96,7 +128,7 @@ class LoginActivity : AppCompatActivity() {
 
     companion object {
         private val TAG = "LoginActivity";
-        private val REGEX_LOGIN_BUTTON = Regex("[a-zA-Z\\-\\.#_ ]*");
+        private val REGEX_LOGIN_BUTTON = Regex("[a-zA-Z\\-\\.#:_ ]*");
 
         private var _callback: ((SourceAuth?) -> Unit)? = null;
 

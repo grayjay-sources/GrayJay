@@ -8,16 +8,20 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.io.StringWriter
 import java.net.SocketTimeoutException
 
 class HttpContext : AutoCloseable {
-    private val _stream: BufferedReader;
+    private val _inputStream: InputStream;
     private var _responseStream: OutputStream? = null;
-    
+
     var id: String? = null;
-    
+
     var head: String = "";
     var headers: HttpHeaders = HttpHeaders();
 
@@ -39,74 +43,128 @@ class HttpContext : AutoCloseable {
     private val _responseHeaders: HttpHeaders = HttpHeaders();
 
 
-    constructor(stream: BufferedReader, responseStream: OutputStream? = null, requestId: String? = null, timeout: Int? = null) {
-        _stream = stream;
+    constructor(inputStream: InputStream, responseStream: OutputStream? = null, requestId: String? = null, timeout: Int? = null) {
+        _inputStream = inputStream;
         _responseStream = responseStream;
         this.id = requestId;
 
-        try {
-            head = stream.readLine() ?: throw EmptyRequestException("No head found");
-        }
-        catch(ex: SocketTimeoutException) {
-            if((timeout ?: 0) > 0)
-                throw KeepAliveTimeoutException("Keep-Alive timedout", ex);
-            throw ex;
-        }
-
-        val methodEndIndex = head.indexOf(' ');
-        val urlEndIndex = head.indexOf(' ', methodEndIndex + 1);
-        if (methodEndIndex == -1 || urlEndIndex == -1) {
-            Logger.w(TAG, "Skipped request, wrong format.");
-            throw IllegalStateException("Invalid request");
-        }
-
-        method = head.substring(0, methodEndIndex);
-        path = head.substring(methodEndIndex + 1, urlEndIndex);
-
-        if (path.contains("?")) {
-            val queryPartIndex = path.indexOf("?");
-            val queryParts = path.substring(queryPartIndex + 1).split("&");
-            path = path.substring(0, queryPartIndex);
-
-            for(queryPart in queryParts) {
-                val eqIndex = queryPart.indexOf("=");
-                if(eqIndex > 0)
-                    query.put(queryPart.substring(0, eqIndex), queryPart.substring(eqIndex + 1));
-                else
-                    query.put(queryPart, "");
+        val headerBytes = readHeaderBytes()
+        ByteArrayInputStream(headerBytes).use {
+            val reader = it.bufferedReader(Charsets.UTF_8)
+            try {
+                head = reader.readLine() ?: throw EmptyRequestException("No head found");
             }
-        }
+            catch(ex: SocketTimeoutException) {
+                if((timeout ?: 0) > 0)
+                    throw KeepAliveTimeoutException("Keep-Alive timedout", ex);
+                throw ex;
+            }
 
-        while (true) {
-            val line = stream.readLine();
-            val headerEndIndex = line.indexOf(":");
-            if (headerEndIndex == -1)
-                break;
+            val methodEndIndex = head.indexOf(' ');
+            val urlEndIndex = head.indexOf(' ', methodEndIndex + 1);
+            if (methodEndIndex == -1 || urlEndIndex == -1) {
+                Logger.w(TAG, "Skipped request, wrong format.");
+                throw IllegalStateException("Invalid request");
+            }
 
-            val headerKey = line.substring(0, headerEndIndex).lowercase()
-            val headerValue = line.substring(headerEndIndex + 1).trim();
-            headers[headerKey] = headerValue;
+            method = head.substring(0, methodEndIndex);
+            path = head.substring(methodEndIndex + 1, urlEndIndex);
 
-            when(headerKey) {
-                "content-length" -> contentLength = headerValue.toLong();
-                "content-type" -> contentType = headerValue;
-                "connection" -> keepAlive = headerValue.lowercase() == "keep-alive";
-                "keep-alive" -> {
-                    val keepAliveParams = headerValue.split(",");
-                    for(keepAliveParam in keepAliveParams) {
-                        val eqIndex = keepAliveParam.indexOf("=");
-                        if(eqIndex > 0){
-                            when(keepAliveParam.substring(0, eqIndex)) {
-                                "timeout" -> keepAliveTimeout = keepAliveParam.substring(eqIndex+1).toInt();
-                                "max" -> keepAliveTimeout = keepAliveParam.substring(eqIndex+1).toInt();
+            if (path.contains("?")) {
+                val queryPartIndex = path.indexOf("?");
+                val queryParts = path.substring(queryPartIndex + 1).split("&");
+                path = path.substring(0, queryPartIndex);
+
+                for(queryPart in queryParts) {
+                    val eqIndex = queryPart.indexOf("=");
+                    if(eqIndex > 0)
+                        query.put(queryPart.substring(0, eqIndex), queryPart.substring(eqIndex + 1));
+                    else
+                        query.put(queryPart, "");
+                }
+            }
+
+            while (true) {
+                val line = reader.readLine();
+                val headerEndIndex = line.indexOf(":");
+                if (headerEndIndex == -1)
+                    break;
+
+                val headerKey = line.substring(0, headerEndIndex).lowercase()
+                val headerValue = line.substring(headerEndIndex + 1).trim();
+                headers[headerKey] = headerValue;
+
+                when(headerKey) {
+                    "content-length" -> contentLength = headerValue.toLong();
+                    "content-type" -> contentType = headerValue;
+                    "connection" -> keepAlive = headerValue.lowercase() == "keep-alive";
+                    "keep-alive" -> {
+                        val keepAliveParams = headerValue.split(",");
+                        for(keepAliveParam in keepAliveParams) {
+                            val eqIndex = keepAliveParam.indexOf("=");
+                            if(eqIndex > 0){
+                                when(keepAliveParam.substring(0, eqIndex)) {
+                                    "timeout" -> keepAliveTimeout = keepAliveParam.substring(eqIndex+1).toInt();
+                                    "max" -> keepAliveTimeout = keepAliveParam.substring(eqIndex+1).toInt();
+                                }
                             }
                         }
                     }
                 }
+                if(line.isNullOrEmpty())
+                    break;
             }
-            if(line.isNullOrEmpty())
-                break;
         }
+    }
+
+    private fun readHeaderBytes(): ByteArray {
+        val headerBytes = ByteArrayOutputStream()
+        var crlfCount = 0
+
+        while (crlfCount < 4) {
+            val b = _inputStream.read()
+            if (b == -1) {
+                throw IOException("Unexpected end of stream while reading headers")
+            }
+
+            if (b == 0x0D || b == 0x0A) { // CR or LF
+                crlfCount++
+            } else {
+                crlfCount = 0
+            }
+
+            headerBytes.write(b)
+        }
+
+        return headerBytes.toByteArray()
+    }
+
+    fun readContentBytes(buffer: ByteArray, length: Int): Int {
+        val remainingBytes = (contentLength - _totalRead).coerceAtMost(length.toLong()).toInt()
+        val read = _inputStream.read(buffer, 0, remainingBytes);
+        if (read > 0) {
+            _totalRead += read
+        }
+
+        return read;
+    }
+    fun readContentString(): String {
+        val byteArrayOutputStream = ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        var read: Int
+        while (true) {
+            read = readContentBytes(buffer, buffer.size)
+            if (read <= 0) break
+            byteArrayOutputStream.write(buffer, 0, read)
+        }
+        return byteArrayOutputStream.toString(Charsets.UTF_8.name())
+    }
+    inline fun <reified T> readContentJson() : T {
+        return Serializer.json.decodeFromString(readContentString());
+    }
+    fun skipBody() {
+        if (contentLength > 0)
+            _inputStream.skip(contentLength - _totalRead)
     }
 
     fun getHttpHeaderString(): String {
@@ -139,11 +197,30 @@ class HttpContext : AutoCloseable {
     }
     fun respondCode(status: Int, headers: HttpHeaders, body: String? = null) {
         val bytes = body?.toByteArray(Charsets.UTF_8);
-        if(body != null && headers.get("content-length").isNullOrEmpty())
-            headers.put("content-length", bytes!!.size.toString());
+        if(headers.get("content-length").isNullOrEmpty()) {
+            if (body != null) {
+                headers.put("content-length", bytes!!.size.toString());
+            } else {
+                headers.put("content-length", "0")
+            }
+        }
         respond(status, headers) { responseStream ->
             if(body != null) {
                 responseStream.write(bytes!!);
+            }
+        }
+    }
+    fun respondBytes(status: Int, headers: HttpHeaders, body: ByteArray? = null) {
+        if(headers.get("content-length").isNullOrEmpty()) {
+            if (body != null) {
+                headers.put("content-length", body.size.toString());
+            } else {
+                headers.put("content-length", "0")
+            }
+        }
+        respond(status, headers) { responseStream ->
+            if(body != null) {
+                responseStream.write(body);
             }
         }
     }
@@ -161,8 +238,7 @@ class HttpContext : AutoCloseable {
             headersToRespond.put("keep-alive", "timeout=5, max=1000");
         }
 
-        val responseHeader = HttpResponse(status, headers);
-
+        val responseHeader = HttpResponse(status, headersToRespond);
         responseStream.write(responseHeader.getHttpHeaderBytes());
 
         if(method != "HEAD") {
@@ -172,38 +248,9 @@ class HttpContext : AutoCloseable {
         statusCode = status;
     }
 
-    fun readContentBytes(buffer: CharArray, length: Int) : Int {
-        val reading = Math.min(length, (contentLength - _totalRead).toInt());
-        val read = _stream.read(buffer, 0, reading);
-        _totalRead += read;
-
-        //TODO: Fix this properly
-        if(contentLength - _totalRead < 400 && read < length) {
-            _totalRead = contentLength;
-        }
-        return read;
-    }
-    fun readContentString() : String{
-        val writer = StringWriter();
-        var read = 0;
-        val buffer = CharArray(4096);
-        do {
-            read = readContentBytes(buffer, buffer.size);
-            writer.write(buffer, 0, read);
-        } while(read > 0);
-        return writer.toString();
-    }
-    inline fun <reified T> readContentJson() : T {
-        return Serializer.json.decodeFromString(readContentString());
-    }
-    fun skipBody() {
-        if(contentLength > 0)
-            _stream.skip(contentLength - _totalRead);
-    }
-
     override fun close() {
         if(!keepAlive) {
-            _stream?.close();
+            _inputStream.close();
             _responseStream?.close();
         }
     }

@@ -1,5 +1,6 @@
 package com.futo.platformplayer.fragment.channel.tab
 
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -7,44 +8,49 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.futo.platformplayer.logging.Logger
-import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.R
+import com.futo.platformplayer.Settings
 import com.futo.platformplayer.UIDialogs
-import com.futo.platformplayer.UISlideOverlays
 import com.futo.platformplayer.api.media.models.PlatformAuthorLink
 import com.futo.platformplayer.api.media.models.channels.IPlatformChannel
 import com.futo.platformplayer.api.media.models.contents.ContentType
 import com.futo.platformplayer.api.media.models.contents.IPlatformContent
-import com.futo.platformplayer.api.media.models.video.IPlatformVideo
 import com.futo.platformplayer.api.media.platforms.js.models.JSPager
 import com.futo.platformplayer.api.media.structures.IAsyncPager
 import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.api.media.structures.IRefreshPager
 import com.futo.platformplayer.api.media.structures.IReplacerPager
 import com.futo.platformplayer.api.media.structures.MultiPager
-import com.futo.platformplayer.cache.ChannelContentCache
 import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.constructs.Event2
+import com.futo.platformplayer.constructs.Event3
 import com.futo.platformplayer.constructs.TaskHandler
+import com.futo.platformplayer.dp
 import com.futo.platformplayer.engine.exceptions.PluginException
 import com.futo.platformplayer.engine.exceptions.ScriptCaptchaRequiredException
+import com.futo.platformplayer.exceptions.ChannelException
 import com.futo.platformplayer.fragment.mainactivity.main.FeedView
-import com.futo.platformplayer.fragment.mainactivity.main.PolycentricProfile
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.states.StateCache
+import com.futo.platformplayer.states.StatePlatform
+import com.futo.platformplayer.states.StatePlugins
 import com.futo.platformplayer.states.StatePolycentric
 import com.futo.platformplayer.states.StateSubscriptions
 import com.futo.platformplayer.views.FeedStyle
-import com.futo.platformplayer.views.adapters.PreviewContentListAdapter
+import com.futo.platformplayer.views.SearchView
 import com.futo.platformplayer.views.adapters.ContentPreviewViewHolder
 import com.futo.platformplayer.views.adapters.InsertedViewAdapterWithLoader
+import com.futo.platformplayer.views.adapters.feedtypes.PreviewContentListAdapter
+import com.futo.polycentric.core.PolycentricProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.math.max
 
-class ChannelContentsFragment : Fragment(), IChannelTabFragment {
+class ChannelContentsFragment(private val subType: String? = null) : Fragment(), IChannelTabFragment {
     private var _recyclerResults: RecyclerView? = null;
-    private var _llmVideo: LinearLayoutManager? = null;
+    private var _glmVideo: GridLayoutManager? = null;
     private var _loading = false;
     private var _pager_parent: IPager<IPlatformContent>? = null;
     private var _pager: IPager<IPlatformContent>? = null;
@@ -53,37 +59,61 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
     private var _results: ArrayList<IPlatformContent> = arrayListOf();
     private var _adapterResults: InsertedViewAdapterWithLoader<ContentPreviewViewHolder>? = null;
     private var _lastPolycentricProfile: PolycentricProfile? = null;
+    private var _query: String? = null
+    private var _searchView: SearchView? = null
 
-    val onContentClicked = Event2<IPlatformContent, Long>();
+    val onContentClicked = Event3<IPlatformContent, Long, Pair<IPager<IPlatformContent>, ArrayList<IPlatformContent>>?>();
     val onContentUrlClicked = Event2<String, ContentType>();
+    val onUrlClicked = Event1<String>();
     val onChannelClicked = Event1<PlatformAuthorLink>();
     val onAddToClicked = Event1<IPlatformContent>();
     val onAddToQueueClicked = Event1<IPlatformContent>();
+    val onAddToWatchLaterClicked = Event1<IPlatformContent>();
+    val onLongPress = Event1<IPlatformContent>();
+
 
     private fun getContentPager(channel: IPlatformChannel): IPager<IPlatformContent> {
         Logger.i(TAG, "getContentPager");
 
-        val lastPolycentricProfile = _lastPolycentricProfile;
-        var pager: IPager<IPlatformContent>? = null;
-        if (lastPolycentricProfile != null)
-            pager= StatePolycentric.instance.getChannelContent(lifecycleScope, lastPolycentricProfile);
+        var pager: IPager<IPlatformContent>? = null
+        val query = _query
+        if (!query.isNullOrBlank()) {
+            if(subType != null) {
+                Logger.i(TAG, "StatePlatform.instance.searchChannel(channel.url = ${channel.url}, query = ${query}, subType = ${subType})")
+                pager = StatePlatform.instance.searchChannel(channel.url, query, subType);
+            } else {
+                Logger.i(TAG, "StatePlatform.instance.searchChannel(channel.url = ${channel.url}, query = ${query})")
+                pager = StatePlatform.instance.searchChannel(channel.url, query);
+            }
+        } else {
+            val lastPolycentricProfile = _lastPolycentricProfile;
+            if (lastPolycentricProfile != null && StatePolycentric.instance.enabled) {
+                pager = StatePolycentric.instance.getChannelContent(lifecycleScope, lastPolycentricProfile, type = subType);
+                Logger.i(TAG, "StatePolycentric.instance.getChannelContent(lifecycleScope, lastPolycentricProfile, type = ${subType})")
+            }
 
-        if(pager == null)
-            pager = StatePlatform.instance.getChannelContent(channel.url);
-
+            if(pager == null) {
+                if(subType != null) {
+                    pager = StatePlatform.instance.getChannelContent(channel.url, subType);
+                    Logger.i(TAG, "StatePlatform.instance.getChannelContent(channel.url = ${channel.url}, subType = ${subType})")
+                } else {
+                    pager = StatePlatform.instance.getChannelContent(channel.url);
+                    Logger.i(TAG, "StatePlatform.instance.getChannelContent(channel.url = ${channel.url})")
+                }
+            }
+        }
         return pager;
     }
 
     private val _taskLoadVideos = TaskHandler<IPlatformChannel, IPager<IPlatformContent>>({lifecycleScope}, {
-            return@TaskHandler getContentPager(it);
+            val livePager = getContentPager(it);
+            return@TaskHandler if(_channel?.let { StateSubscriptions.instance.isSubscribed(it) } == true)
+                StateCache.cachePagerResults(lifecycleScope, livePager);
+            else livePager;
         }).success { livePager ->
             setLoading(false);
 
-            val pager = if(_channel?.let { StateSubscriptions.instance.isSubscribed(it) } == true)
-                ChannelContentCache.cachePagerResults(lifecycleScope, livePager);
-            else livePager;
-
-            setPager(pager);
+            setPager(livePager);
         }
         .exception<ScriptCaptchaRequiredException> {  }
         .exception<Throwable> {
@@ -101,14 +131,10 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
         return@TaskHandler it.getResults();
     }).success {
         setLoading(false);
-        if (it.isEmpty()) {
-            return@success;
-        }
-
         val posBefore = _results.size;
-        val toAdd = it.filter { it is IPlatformVideo }.map { it as IPlatformVideo };
-        _results.addAll(toAdd);
-        _adapterResults?.let { adapterVideo -> adapterVideo.notifyItemRangeInserted(adapterVideo.childToParentPosition(posBefore), toAdd.size); };
+        //val toAdd = it.filter { it is IPlatformVideo }.map { it as IPlatformVideo }
+        _results.addAll(it);
+        _adapterResults?.let { adapterVideo -> adapterVideo.notifyItemRangeInserted(adapterVideo.childToParentPosition(posBefore), it.size); };
     }.exception<Throwable> {
         Logger.w(TAG, "Failed to load next page.", it);
         UIDialogs.showGeneralRetryErrorDialog(requireContext(), it.message ?: "", it, { loadNextPage() });
@@ -119,7 +145,7 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
             super.onScrolled(recyclerView, dx, dy);
 
             val recyclerResults = _recyclerResults ?: return;
-            val llmVideo = _llmVideo ?: return;
+            val llmVideo = _glmVideo ?: return;
 
             val visibleItemCount = recyclerResults.childCount;
             val firstVisibleItem = llmVideo.findFirstVisibleItemPosition();
@@ -141,30 +167,68 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
 
         _taskLoadVideos.cancel();
 
+        _query = null
         _channel = channel;
+        updateSearchViewVisibility()
         _results.clear();
         _adapterResults?.notifyDataSetChanged();
 
         loadInitial();
     }
 
+    private fun updateSearchViewVisibility() {
+        if (subType != null) {
+            _searchView?.visibility = View.GONE
+            return
+        }
+
+        val client = _channel?.id?.pluginId?.let { StatePlatform.instance.getClientOrNull(it) }
+        Logger.i(TAG, "_searchView.visible = ${client?.capabilities?.hasSearchChannelContents == true}")
+        _searchView?.visibility = if (client?.capabilities?.hasSearchChannelContents == true) View.VISIBLE else View.GONE
+    }
+
+    fun setQuery(query: String) {
+        _query = query
+        _taskLoadVideos.cancel()
+        _results.clear()
+        _adapterResults?.notifyDataSetChanged()
+        loadInitial()
+    }
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val view = inflater.inflate(R.layout.fragment_channel_videos, container, false);
 
+        _query = null
         _recyclerResults = view.findViewById(R.id.recycler_videos);
 
-        _adapterResults = PreviewContentListAdapter(view.context, FeedStyle.THUMBNAIL, _results).apply {
+        val searchView = SearchView(requireContext()).apply { layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT) }.apply {
+            onEnter.subscribe {
+                setQuery(it)
+            }
+        }
+        _searchView = searchView
+        updateSearchViewVisibility()
+
+        _adapterResults = PreviewContentListAdapter(lifecycleScope, view.context, FeedStyle.THUMBNAIL, _results, null, Settings.instance.channel.progressBar, viewsToPrepend = arrayListOf(searchView)).apply {
             this.onContentUrlClicked.subscribe(this@ChannelContentsFragment.onContentUrlClicked::emit);
-            this.onContentClicked.subscribe(this@ChannelContentsFragment.onContentClicked::emit);
+            this.onUrlClicked.subscribe(this@ChannelContentsFragment.onUrlClicked::emit);
+            this.onContentClicked.subscribe { content, num ->
+                val results = ArrayList(_results)
+                this@ChannelContentsFragment.onContentClicked.emit(content, num, Pair(_pager!!, results))
+            }
             this.onChannelClicked.subscribe(this@ChannelContentsFragment.onChannelClicked::emit);
             this.onAddToClicked.subscribe(this@ChannelContentsFragment.onAddToClicked::emit);
             this.onAddToQueueClicked.subscribe(this@ChannelContentsFragment.onAddToQueueClicked::emit);
+            this.onAddToWatchLaterClicked.subscribe(this@ChannelContentsFragment.onAddToWatchLaterClicked::emit);
+            this.onLongPress.subscribe(this@ChannelContentsFragment.onLongPress::emit);
         }
 
-        _llmVideo = LinearLayoutManager(view.context);
+        val numColumns = max((resources.configuration.screenWidthDp.toDouble() / resources.getInteger(R.integer.column_width_dp)).toInt(), 1)
+        _glmVideo = GridLayoutManager(view.context, numColumns);
         _recyclerResults?.adapter = _adapterResults;
-        _recyclerResults?.layoutManager = _llmVideo;
+        _recyclerResults?.layoutManager = _glmVideo;
         _recyclerResults?.addOnScrollListener(_scrollListener);
+
 
         return view;
     }
@@ -174,9 +238,18 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
         _recyclerResults?.removeOnScrollListener(_scrollListener);
         _recyclerResults = null;
         _pager = null;
+        _query = null
+        _searchView = null
 
         _taskLoadVideos.cancel();
         _nextPageHandler.cancel();
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        _glmVideo?.spanCount =
+            max((resources.configuration.screenWidthDp.toDouble() / resources.getInteger(R.integer.column_width_dp)).toInt(), 1)
     }
 
     /*
@@ -217,14 +290,14 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
 
     fun setPager(pager: IPager<IPlatformContent>, cache: FeedView.ItemCache<IPlatformContent>? = null) {
         if (_pager_parent != null && _pager_parent is IRefreshPager<*>) {
-            (_pager_parent as IRefreshPager<*>).onPagerError?.remove(this);
-            (_pager_parent as IRefreshPager<*>).onPagerChanged?.remove(this);
+            (_pager_parent as IRefreshPager<*>).onPagerError.remove(this);
+            (_pager_parent as IRefreshPager<*>).onPagerChanged.remove(this);
             _pager_parent = null;
         }
         if(_pager is IReplacerPager<*>)
             (_pager as IReplacerPager<*>).onReplaced.remove(this);
 
-        var pagerToSet: IPager<IPlatformContent>? = null;
+        var pagerToSet: IPager<IPlatformContent>?;
         if(pager is IRefreshPager<*>) {
             _pager_parent = pager;
             pagerToSet = pager.getCurrentPager() as IPager<IPlatformContent>;
@@ -289,6 +362,7 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
     }
 
     private fun loadInitial() {
+        Logger.i(TAG, "loadInitial")
         val channel: IPlatformChannel = _channel ?: return;
         setLoading(true);
         _taskLoadVideos.run(channel);
@@ -307,7 +381,7 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
         _adapterResults?.setLoading(loading);
     }
 
-    fun setPolycentricProfile(polycentricProfile: PolycentricProfile?, animate: Boolean) {
+    override fun setPolycentricProfile(polycentricProfile: PolycentricProfile?) {
         val p = _lastPolycentricProfile;
         if (p != null && polycentricProfile != null && p.system == polycentricProfile.system) {
             Logger.i(TAG, "setPolycentricProfile skipped because previous was same");
@@ -338,8 +412,11 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
                 context?.let {
                     lifecycleScope.launch(Dispatchers.Main) {
                         try {
+                            val channel = if(kv.value is ChannelException) (kv.value as ChannelException).channelNameOrUrl else null;
                             if(jsVideoPager != null)
-                                UIDialogs.toast(it, "Plugin ${jsVideoPager.getPluginConfig().name} failed:\n${kv.value.message}", false);
+                                UIDialogs.toast(it, "Plugin ${jsVideoPager.getPluginConfig().name} failed:\n" +
+                                        (if(!channel.isNullOrEmpty()) "(${channel}) " else "") +
+                                        "${kv.value.message}", false);
                             else
                                 UIDialogs.toast(it, kv.value.message ?: "", false);
                         } catch (e: Throwable) {
@@ -353,6 +430,6 @@ class ChannelContentsFragment : Fragment(), IChannelTabFragment {
 
     companion object {
         val TAG = "VideoListFragment";
-        fun newInstance() = ChannelContentsFragment().apply { }
+        fun newInstance(subType: String? = null) = ChannelContentsFragment(subType).apply { }
     }
 }

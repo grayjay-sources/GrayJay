@@ -7,12 +7,12 @@ import com.futo.platformplayer.api.media.models.PlatformAuthorLink
 import com.futo.platformplayer.api.media.models.Thumbnails
 import com.futo.platformplayer.api.media.models.comments.IPlatformComment
 import com.futo.platformplayer.api.media.models.contents.ContentType
+import com.futo.platformplayer.api.media.models.contents.IPlatformContent
 import com.futo.platformplayer.api.media.models.playback.IPlaybackTracker
 import com.futo.platformplayer.api.media.models.ratings.IRating
 import com.futo.platformplayer.api.media.models.streams.sources.*
 import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.serializers.OffsetDateTimeNullableSerializer
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.OffsetDateTime
@@ -37,9 +37,14 @@ open class SerializedPlatformVideoDetails(
     override val video: ISerializedVideoSourceDescriptor,
     override val preview: ISerializedVideoSourceDescriptor?,
 
-    override val subtitles: List<SubtitleRawSource> = listOf()
+    override val subtitles: List<SubtitleRawSource> = listOf(),
+    override val isShort: Boolean = false
 ) : IPlatformVideo, IPlatformVideoDetails {
     final override val contentType: ContentType get() = ContentType.MEDIA;
+
+    override var playbackTime: Long = -1;
+    @kotlinx.serialization.Serializable(with = OffsetDateTimeNullableSerializer::class)
+    override var playbackDate: OffsetDateTime? = null;
 
     override val isLive: Boolean get() = false;
 
@@ -56,6 +61,7 @@ open class SerializedPlatformVideoDetails(
 
     override fun getComments(client: IPlatformClient): IPager<IPlatformComment>? = null;
     override fun getPlaybackTracker(): IPlaybackTracker? = null;
+    override fun getContentRecommendations(client: IPlatformClient): IPager<IPlatformContent>? = null;
 
     companion object {
         fun fromVideo(video : IPlatformVideoDetails, subtitleSources: List<SubtitleRawSource>) : SerializedPlatformVideoDetails {

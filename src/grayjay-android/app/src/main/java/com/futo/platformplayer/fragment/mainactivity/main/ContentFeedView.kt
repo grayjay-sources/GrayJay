@@ -1,33 +1,46 @@
 package com.futo.platformplayer.fragment.mainactivity.main
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.view.LayoutInflater
 import android.widget.LinearLayout
-import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.futo.platformplayer.*
+import com.futo.platformplayer.R
+import com.futo.platformplayer.Settings
+import com.futo.platformplayer.UIDialogs
+import com.futo.platformplayer.UISlideOverlays
+import com.futo.platformplayer.api.media.models.article.IPlatformArticle
 import com.futo.platformplayer.api.media.models.contents.ContentType
 import com.futo.platformplayer.api.media.models.contents.IPlatformContent
 import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylist
 import com.futo.platformplayer.api.media.models.post.IPlatformPost
 import com.futo.platformplayer.api.media.models.video.IPlatformVideo
-import com.futo.platformplayer.api.media.structures.*
+import com.futo.platformplayer.api.media.models.video.SerializedPlatformVideo
+import com.futo.platformplayer.api.media.platforms.js.models.JSWeb
+import com.futo.platformplayer.api.media.structures.IPager
+import com.futo.platformplayer.fragment.mainactivity.main.ShortView.Companion
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.states.StateMeta
 import com.futo.platformplayer.states.StatePlayer
 import com.futo.platformplayer.states.StatePlaylists
 import com.futo.platformplayer.video.PlayerManager
 import com.futo.platformplayer.views.FeedStyle
-import com.futo.platformplayer.views.adapters.PreviewContentListAdapter
 import com.futo.platformplayer.views.adapters.ContentPreviewViewHolder
 import com.futo.platformplayer.views.adapters.InsertedViewAdapterWithLoader
 import com.futo.platformplayer.views.adapters.InsertedViewHolder
-import com.futo.platformplayer.views.adapters.PreviewNestedVideoViewHolder
-import com.futo.platformplayer.views.adapters.PreviewVideoViewHolder
+import com.futo.platformplayer.views.adapters.feedtypes.PreviewContentListAdapter
+import com.futo.platformplayer.views.adapters.feedtypes.PreviewNestedVideoViewHolder
+import com.futo.platformplayer.views.adapters.feedtypes.PreviewVideoViewHolder
 import com.futo.platformplayer.views.overlays.slideup.SlideUpMenuItem
+import com.futo.platformplayer.views.overlays.slideup.SlideUpMenuOverlay
+import com.futo.platformplayer.withTimestamp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlin.math.floor
+import kotlin.math.max
 
 abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent, IPlatformContent, IPager<IPlatformContent>, ContentPreviewViewHolder> where TFragment : MainFragment {
     private var _exoPlayer: PlayerManager? = null;
@@ -37,10 +50,10 @@ abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent
     private var _previewsEnabled: Boolean = true;
     override val visibleThreshold: Int get() = if (feedStyle == FeedStyle.PREVIEW) { 5 } else { 10 };
     protected lateinit var headerView: LinearLayout;
+    private var _videoOptionsOverlay: SlideUpMenuOverlay? = null;
+    protected open val shouldShowTimeBar: Boolean get() = true
 
-    constructor(fragment: TFragment, inflater: LayoutInflater, cachedRecyclerData: RecyclerData<InsertedViewAdapterWithLoader<ContentPreviewViewHolder>, LinearLayoutManager, IPager<IPlatformContent>, IPlatformContent, IPlatformContent, InsertedViewHolder<ContentPreviewViewHolder>>? = null) : super(fragment, inflater, cachedRecyclerData) {
-
-    }
+    constructor(fragment: TFragment, inflater: LayoutInflater, cachedRecyclerData: RecyclerData<InsertedViewAdapterWithLoader<ContentPreviewViewHolder>, GridLayoutManager, IPager<IPlatformContent>, IPlatformContent, IPlatformContent, InsertedViewHolder<ContentPreviewViewHolder>>? = null) : super(fragment, inflater, cachedRecyclerData)
 
     override fun filterResults(results: List<IPlatformContent>): List<IPlatformContent> {
         return results;
@@ -48,83 +61,126 @@ abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent
 
     override fun createAdapter(recyclerResults: RecyclerView, context: Context, dataset: ArrayList<IPlatformContent>): InsertedViewAdapterWithLoader<ContentPreviewViewHolder> {
         val player = StatePlayer.instance.getThumbnailPlayerOrCreate(context);
-        player.modifyState("ThumbnailPlayer", { state -> state.muted = true });
+        player.modifyState("ThumbnailPlayer") { state -> state.muted = true };
         _exoPlayer = player;
 
-        val v = LinearLayout(context).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            orientation = LinearLayout.VERTICAL;
-        };
-        headerView = v;
-
-        return PreviewContentListAdapter(context, feedStyle, dataset, player, _previewsEnabled, arrayListOf(v)).apply {
+        return PreviewContentListAdapter(fragment.lifecycleScope, context, feedStyle, dataset, player, _previewsEnabled, arrayListOf(), arrayListOf(), shouldShowTimeBar).apply {
             attachAdapterEvents(this);
         }
     }
 
     private fun attachAdapterEvents(adapter: PreviewContentListAdapter) {
         adapter.onContentUrlClicked.subscribe(this, this@ContentFeedView::onContentUrlClicked);
+        adapter.onUrlClicked.subscribe(this, this@ContentFeedView::onUrlClicked);
         adapter.onContentClicked.subscribe(this) { content, time ->
             this@ContentFeedView.onContentClicked(content, time);
         };
         adapter.onChannelClicked.subscribe(this) { fragment.navigate<ChannelFragment>(it) };
         adapter.onAddToClicked.subscribe(this) { content ->
             //TODO: Reconstruct search video from detail if search is null
-            _overlayContainer.let {
-                if(content is IPlatformVideo)
-                    UISlideOverlays.showVideoOptionsOverlay(content, it, SlideUpMenuItem(context, R.drawable.ic_visibility_off, context.getString(R.string.hide), context.getString(R.string.hide_from_home), "hide",
-                        { StateMeta.instance.addHiddenVideo(content.url);
-                            if (fragment is HomeFragment) {
-                                val removeIndex = recyclerData.results.indexOf(content);
-                                if (removeIndex >= 0) {
-                                    recyclerData.results.removeAt(removeIndex);
-                                    recyclerData.adapter.notifyItemRemoved(recyclerData.adapter.childToParentPosition(removeIndex));
-                                }
-                            }
-                        }),
-                        SlideUpMenuItem(context, R.drawable.ic_playlist, context.getString(R.string.play_feed_as_queue), context.getString(R.string.play_entire_feed), "playFeed",
-                        {
-                            val newQueue = listOf(content) + recyclerData.results
-                                .filterIsInstance<IPlatformVideo>()
-                                .filter { it != content };
-                            StatePlayer.instance.setQueue(newQueue, StatePlayer.TYPE_QUEUE, "Feed Queue", true, false);
-                        })
-                    );
+            if(content is IPlatformVideo) {
+                showVideoOptionsOverlay(content)
             }
         };
         adapter.onAddToQueueClicked.subscribe(this) {
             if(it is IPlatformVideo) {
                 StatePlayer.instance.addToQueue(it);
-                val name = if (it.name.length > 20) (it.name.subSequence(0, 20).toString() + "...") else it.name;
-                UIDialogs.toast(context, context.getString(R.string.queued) + " [$name]", false);
             }
         };
+        adapter.onAddToWatchLaterClicked.subscribe(this) {
+            if(it is IPlatformVideo) {
+                if(StatePlaylists.instance.addToWatchLater(SerializedPlatformVideo.fromVideo(it), true))
+                    UIDialogs.toast("Added to watch later\n[${it.name}]");
+                else
+                    UIDialogs.toast(context.getString(R.string.already_in_watch_later))
+            }
+        };
+        adapter.onLongPress.subscribe(this) {
+            if (it is IPlatformVideo) {
+                showVideoOptionsOverlay(it)
+            }
+        };
+    }
+
+    fun onBackPressed(): Boolean {
+        val videoOptionsOverlay = _videoOptionsOverlay
+        if (videoOptionsOverlay != null) {
+            if (videoOptionsOverlay.isVisible) {
+                videoOptionsOverlay.hide();
+                _videoOptionsOverlay = null
+                return true;
+            }
+
+            _videoOptionsOverlay = null
+            return false
+        }
+
+        return false
+    }
+
+    private fun showVideoOptionsOverlay(content: IPlatformVideo) {
+        _overlayContainer.let {
+            _videoOptionsOverlay = UISlideOverlays.showVideoOptionsOverlay(content, it, SlideUpMenuItem(
+                context,
+                R.drawable.ic_visibility_off,
+                context.getString(R.string.hide),
+                context.getString(R.string.hide_from_home),
+                tag = "hide",
+                call = { StateMeta.instance.addHiddenVideo(content.url);
+                    if (fragment is HomeFragment) {
+                        val removeIndex = recyclerData.results.indexOf(content);
+                        if (removeIndex >= 0) {
+                            recyclerData.results.removeAt(removeIndex);
+                            recyclerData.adapter.notifyItemRemoved(recyclerData.adapter.childToParentPosition(removeIndex));
+                        }
+                    }
+                }),
+                SlideUpMenuItem(context,
+                    R.drawable.ic_playlist,
+                    context.getString(R.string.play_feed_as_queue),
+                    context.getString(R.string.play_entire_feed),
+                    tag = "playFeed",
+                    call = {
+                        val newQueue = listOf(content) + recyclerData.results
+                            .filterIsInstance<IPlatformVideo>()
+                            .filter { it != content };
+                        StatePlayer.instance.setQueue(newQueue, StatePlayer.TYPE_QUEUE, "Feed Queue",
+                            focus = true,
+                            shuffle = false
+                        );
+                    })
+            );
+        }
     }
 
     private fun detachAdapterEvents() {
         val adapter = recyclerData.adapter as PreviewContentListAdapter? ?: return;
         adapter.onContentUrlClicked.remove(this);
+        adapter.onUrlClicked.remove(this);
         adapter.onContentClicked.remove(this);
         adapter.onChannelClicked.remove(this);
         adapter.onAddToClicked.remove(this);
         adapter.onAddToQueueClicked.remove(this);
+        adapter.onAddToWatchLaterClicked.remove(this);
+        adapter.onLongPress.remove(this);
     }
 
-    override fun onRestoreCachedData(cachedData: RecyclerData<InsertedViewAdapterWithLoader<ContentPreviewViewHolder>, LinearLayoutManager, IPager<IPlatformContent>, IPlatformContent, IPlatformContent, InsertedViewHolder<ContentPreviewViewHolder>>) {
+    override fun onRestoreCachedData(cachedData: RecyclerData<InsertedViewAdapterWithLoader<ContentPreviewViewHolder>, GridLayoutManager, IPager<IPlatformContent>, IPlatformContent, IPlatformContent, InsertedViewHolder<ContentPreviewViewHolder>>) {
         super.onRestoreCachedData(cachedData)
-        val v = LinearLayout(context).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            orientation = LinearLayout.VERTICAL;
-        };
-        headerView = v;
-        cachedData.adapter.viewsToPrepend.add(v);
+
         (cachedData.adapter as PreviewContentListAdapter?)?.let { attachAdapterEvents(it) };
     }
 
-    override fun createLayoutManager(recyclerResults: RecyclerView, context: Context): LinearLayoutManager {
-        val llmResults = LinearLayoutManager(context);
-        llmResults.orientation = LinearLayoutManager.VERTICAL;
-        return llmResults;
+    override fun createLayoutManager(
+        recyclerResults: RecyclerView,
+        context: Context
+    ): GridLayoutManager {
+        val glmResults =
+            GridLayoutManager(
+                context,
+                max((resources.configuration.screenWidthDp.toDouble() / resources.getInteger(R.integer.column_width_dp)).toInt(), 1)
+            );
+        return glmResults
     }
 
     override fun onScrollStateChanged(newState: Int) {
@@ -137,35 +193,49 @@ abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent
 
     protected open fun onContentClicked(content: IPlatformContent, time: Long) {
         if(content is IPlatformVideo) {
-            StatePlayer.instance.clearQueue();
-            if (Settings.instance.playback.shouldResumePreview(time))
-                fragment.navigate<VideoDetailFragment>(content.withTimestamp(time)).maximizeVideoDetail();
-            else
-                fragment.navigate<VideoDetailFragment>(content).maximizeVideoDetail();
+            if (StatePlayer.instance.hasQueue) {
+                StatePlayer.instance.insertToQueue(content, true);
+            } else {
+                if (Settings.instance.playback.shouldResumePreview(time))
+                    fragment.navigate<VideoDetailFragment>(content.withTimestamp(time)).maximizeVideoDetail();
+                else
+                    fragment.navigate<VideoDetailFragment>(content).maximizeVideoDetail();
+            }
         } else if (content is IPlatformPlaylist) {
-            fragment.navigate<PlaylistFragment>(content);
+            fragment.navigate<RemotePlaylistFragment>(content);
         } else if (content is IPlatformPost) {
             fragment.navigate<PostDetailFragment>(content);
+        } else if(content is IPlatformArticle) {
+            fragment.navigate<ArticleDetailFragment>(content);
         }
+        else if(content is JSWeb) {
+            fragment.navigate<WebDetailFragment>(content);
+        }
+        else
+            UIDialogs.appToast("Unknown content type [" + content.contentType.name + "]");
     }
     protected open fun onContentUrlClicked(url: String, contentType: ContentType) {
         when(contentType) {
             ContentType.MEDIA -> {
-                StatePlayer.instance.clearQueue();
-                fragment.navigate<VideoDetailFragment>(url).maximizeVideoDetail();
-            };
-            ContentType.PLAYLIST -> fragment.navigate<PlaylistFragment>(url);
-            ContentType.URL -> fragment.navigate<BrowserFragment>(url);
+                StatePlayer.instance.clearQueue()
+                fragment.navigate<VideoDetailFragment>(url).maximizeVideoDetail()
+            }
+            ContentType.PLAYLIST -> fragment.navigate<RemotePlaylistFragment>(url)
+            ContentType.URL -> fragment.navigate<BrowserFragment>(url)
+            ContentType.CHANNEL -> fragment.navigate<ChannelFragment>(url)
             else -> {};
         }
     }
+    protected open fun onUrlClicked(url: String) {
+        fragment.navigate<BrowserFragment>(url);
+    }
 
     private fun playPreview() {
-        if(feedStyle == FeedStyle.THUMBNAIL)
+        if(feedStyle == FeedStyle.THUMBNAIL || recyclerData.layoutManager.spanCount > 1)
             return;
 
-        val firstVisible = recyclerData.layoutManager.findFirstVisibleItemPosition();
-        val lastVisible = recyclerData.layoutManager.findLastVisibleItemPosition();
+        val firstVisible = recyclerData.layoutManager.findFirstVisibleItemPosition()
+        val lastVisible = recyclerData.layoutManager.findLastVisibleItemPosition()
         val itemsVisible = lastVisible - firstVisible + 1;
         val autoPlayIndex = (firstVisible + floor(itemsVisible / 2.0 + 0.49).toInt()).coerceAtLeast(0).coerceAtMost((recyclerData.results.size - 1));
 
@@ -181,11 +251,18 @@ abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent
         }
 
         //TODO: Is this still necessary?
-        if(viewHolder.childViewHolder is ContentPreviewViewHolder)
-            (recyclerData.adapter as PreviewContentListAdapter?)?.preview(viewHolder.childViewHolder)
+        if(viewHolder.childViewHolder is ContentPreviewViewHolder) {
+            fragment.lifecycleScope.launch(Dispatchers.Main) {
+                try {
+                    (recyclerData.adapter as PreviewContentListAdapter?)?.preview(viewHolder.childViewHolder)
+                } catch (e: Throwable) {
+                    Logger.e(TAG, "playPreview failed", e)
+                }
+            }
+        }
     }
 
-    fun stopVideo() {
+    private fun stopVideo() {
         //TODO: Is this still necessary?
         (recyclerData.adapter as PreviewContentListAdapter?)?.stopPreview();
     }
@@ -213,6 +290,6 @@ abstract class ContentFeedView<TFragment> : FeedView<TFragment, IPlatformContent
     }
 
     companion object {
-        private val TAG = "ContentFeedView";
+        private const val TAG = "ContentFeedView";
     }
 }

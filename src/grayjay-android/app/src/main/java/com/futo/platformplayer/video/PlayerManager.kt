@@ -1,16 +1,13 @@
 package com.futo.platformplayer.video
 
-import android.media.MediaPlayer
 import android.media.session.PlaybackState
 import android.support.v4.media.session.PlaybackStateCompat
-import com.futo.platformplayer.constructs.Event1
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
-import com.google.android.exoplayer2.ui.StyledPlayerView
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 
 class PlayerManager {
-    private var _currentView: StyledPlayerView? = null;
+    private var _currentView: PlayerView? = null;
     private val _stateMap = HashMap<String, PlayerState>();
     private var _currentState: PlayerState? = null;
     val currentState: PlayerState get() {
@@ -26,6 +23,7 @@ class PlayerManager {
         this.player = exoPlayer;
     }
 
+
     fun getPlaybackStateCompat() : Int {
         return when(player.playbackState) {
             ExoPlayer.STATE_READY -> if(player.playWhenReady) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED;
@@ -35,16 +33,19 @@ class PlayerManager {
     }
 
     @Synchronized
-    fun attach(view: StyledPlayerView, stateName: String) {
-        if(view != _currentView) {
-            _currentView?.player = null;
-            switchState(stateName);
-            view.player = player;
-            _currentView = view;
+    fun attach(view: PlayerView, stateName: String) {
+        if (view != _currentView) {
+            _currentView?.player = null
+            _currentView = null
+            switchState(stateName)
+            view.player = player
+            _currentView = view
         }
     }
+
     fun detach() {
-        _currentView?.player = null;
+        _currentView?.player = null
+        _currentView = null
     }
 
     fun getState(name: String): PlayerState {
@@ -102,7 +103,5 @@ class PlayerManager {
         var volume: Float = 1f;
 
         var listener: Player.Listener? = null;
-
-        var resizMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT;
     }
 }

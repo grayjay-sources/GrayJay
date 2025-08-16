@@ -1,5 +1,6 @@
 package com.futo.platformplayer.fragment.mainactivity.main
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -7,26 +8,29 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.futo.platformplayer.UIDialogs
-import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.R
+import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.activities.AddSourceOptionsActivity
 import com.futo.platformplayer.api.media.IPlatformClient
 import com.futo.platformplayer.api.media.platforms.js.JSClient
 import com.futo.platformplayer.fragment.mainactivity.topbar.AddTopBarFragment
+import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.states.StatePlugins
 import com.futo.platformplayer.stores.FragmentedStorage
 import com.futo.platformplayer.stores.SubscriptionStorage
-import com.futo.platformplayer.views.sources.SourceUnderConstructionView
 import com.futo.platformplayer.views.adapters.DisabledSourceView
 import com.futo.platformplayer.views.adapters.EnabledSourceAdapter
 import com.futo.platformplayer.views.adapters.EnabledSourceViewHolder
 import com.futo.platformplayer.views.adapters.ItemMoveCallback
+import com.futo.platformplayer.views.buttons.BigButton
+import com.futo.platformplayer.views.sources.SourceUnderConstructionView
 import kotlinx.coroutines.runBlocking
-import java.util.*
+import java.util.Collections
 
 class SourcesFragment : MainFragment() {
     override val isMainView : Boolean = true;
@@ -38,10 +42,13 @@ class SourcesFragment : MainFragment() {
     override fun onShownWithView(parameter: Any?, isBack: Boolean) {
         super.onShownWithView(parameter, isBack)
 
-        if(topBar is AddTopBarFragment)
+        if(topBar is AddTopBarFragment) {
+            (topBar as AddTopBarFragment).onAdd.clear();
             (topBar as AddTopBarFragment).onAdd.subscribe {
+                StateApp.instance.preventPictureInPicture.emit();
                 startActivity(Intent(requireContext(), AddSourceOptionsActivity::class.java));
             };
+        }
 
         _view?.reloadSources();
     }
@@ -83,6 +90,15 @@ class SourcesFragment : MainFragment() {
             _containerDisabledViews = findViewById(R.id.container_disabled_views);
             _containerConstruction = findViewById(R.id.container_construction);
 
+            if(StatePlatform.instance.getAvailableClients().isEmpty()) {
+                findViewById<LinearLayout>(R.id.no_sources).isVisible = true;
+                findViewById<LinearLayout>(R.id.plugin_disclaimer).isVisible = false;
+            }
+            findViewById<BigButton>(R.id.button_add_sources).onClick.subscribe {
+                StateApp.instance.preventPictureInPicture.emit();
+                fragment.startActivity(Intent(context, AddSourceOptionsActivity::class.java));
+            };
+
             for(inConstructSource in StatePlugins.instance.getSourcesUnderConstruction(context))
                 _containerConstruction.addView(SourceUnderConstructionView(context, inConstructSource.key, inConstructSource.value));
 
@@ -108,8 +124,6 @@ class SourcesFragment : MainFragment() {
 
                 adapterSourcesEnabled.notifyItemMoved(fromPosition, toPosition);
                 onEnabledChanged(enabledSources);
-                if(toPosition == 0)
-                    onPrimaryChanged(enabledSources.first());
 
                 StatePlatform.instance.setPlatformOrder(enabledSources.map { it.name });
             };
@@ -130,8 +144,6 @@ class SourcesFragment : MainFragment() {
 
                     updateContainerVisibility();
                     onEnabledChanged(enabledSources);
-                    if(index == 0)
-                        onPrimaryChanged(enabledSources.first());
 
                     if(enabledSources.size <= 1)
                         setCanRemove(false);
@@ -159,15 +171,15 @@ class SourcesFragment : MainFragment() {
             _didCreateView = true;
         }
 
+        @SuppressLint("NotifyDataSetChanged")
         fun reloadSources() {
             enabledSources.clear();
             disabledSources.clear();
 
             enabledSources.addAll(StatePlatform.instance.getSortedEnabledClient());
             disabledSources.addAll(StatePlatform.instance.getAvailableClients().filter { !enabledSources.contains(it) });
-            _adapterSourcesEnabled?.notifyDataSetChanged();
+            _adapterSourcesEnabled.notifyDataSetChanged();
             setCanRemove(enabledSources.size > 1);
-            //_adapterSourcesDisabled?.notifyDataSetChanged();
             updateDisabledSources();
 
             if(_didCreateView) {
@@ -207,23 +219,17 @@ class SourcesFragment : MainFragment() {
         }
 
         private fun setCanRemove(canRemove: Boolean) {
-            val recyclerSourcesEnabled = _recyclerSourcesEnabled ?: return;
-            var adapterSourcesEnabled = _adapterSourcesEnabled ?: return;
-
-            for (i in 0 until recyclerSourcesEnabled.childCount) {
-                val view: View = recyclerSourcesEnabled.getChildAt(i)
-                val viewHolder = recyclerSourcesEnabled.getChildViewHolder(view)
+            for (i in 0 until _recyclerSourcesEnabled.childCount) {
+                val view: View = _recyclerSourcesEnabled.getChildAt(i)
+                val viewHolder = _recyclerSourcesEnabled.getChildViewHolder(view)
                 if (viewHolder is EnabledSourceViewHolder) {
                     viewHolder.setCanRemove(canRemove);
                 }
             }
 
-            adapterSourcesEnabled.canRemove = canRemove;
+            _adapterSourcesEnabled.canRemove = canRemove;
         }
 
-        private fun onPrimaryChanged(client: IPlatformClient) {
-            StatePlatform.instance.selectPrimaryClient(client.id);
-        }
         private fun onEnabledChanged(clients: List<IPlatformClient>) {
             runBlocking {
                 StatePlatform.instance.selectClients(*clients.map { it.id }.toTypedArray());

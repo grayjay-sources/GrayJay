@@ -104,6 +104,7 @@
                     <ImageView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
+                        android:contentDescription="@string/cd_download_indicator"
                         android:scaleType="fitXY"
                         app:srcCompat="@drawable/download_for_offline" />
                 </FrameLayout>
@@ -112,11 +113,26 @@
                     android:id="@+id/thumbnail_platform"
                     android:layout_width="20dp"
                     android:layout_height="20dp"
+                    android:contentDescription="@string/cd_platform_indicator"
                     android:layout_alignParentStart="true"
                     android:layout_alignParentBottom="true"
                     android:layout_gravity="end"
                     android:layout_marginStart="4dp"
                     android:layout_marginBottom="4dp" />
+
+                <com.futo.platformplayer.views.others.ProgressBar
+                    android:id="@+id/time_bar"
+                    android:layout_width="match_parent"
+                    android:layout_height="2dp"
+                    android:layout_alignParentStart="true"
+                    android:layout_alignParentBottom="true"
+                    app:progress="60%"
+                    app:inactiveColor="#55EEEEEE"
+                    app:radiusBottomLeft="4dp"
+                    app:radiusBottomRight="4dp"
+                    app:radiusTopLeft="0dp"
+                    app:radiusTopRight="0dp"
+                    android:visibility="visible"/>
             </RelativeLayout>
         </FrameLayout>
 
@@ -126,39 +142,21 @@
             android:layout_marginStart="6dp"
             android:layout_marginEnd="6dp">
 
-            <ImageButton
-                android:id="@+id/button_add_to_queue"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="1dp"
-                android:paddingTop="7dp"
-                android:paddingStart="6dp"
-                android:paddingEnd="5dp"
-                android:paddingBottom="3dp"
-                app:srcCompat="@drawable/ic_queue_16dp"
-                android:background="@drawable/edit_text_background"
-                android:contentDescription="@string/add_to_queue"
-                app:layout_constraintLeft_toLeftOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent" />
-
             <LinearLayout
                 android:id="@+id/button_add_to"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="27dp"
                 android:orientation="horizontal"
                 android:background="@drawable/edit_text_background"
-                android:layout_marginStart="4dp"
                 android:gravity="center_vertical"
-                android:padding="4dp"
-                app:layout_constraintLeft_toRightOf="@id/button_add_to_queue"
+                android:padding="5dp"
+                app:layout_constraintLeft_toLeftOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent">
-                <ImageButton
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="4dp"
-                    app:srcCompat="@drawable/ic_add_white_8dp"
-                    android:layout_marginStart="4dp"
-                    android:contentDescription="@string/options" />
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="16dp"
+                    android:paddingTop="1dp"
+                    android:src="@drawable/ic_settings" />
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -171,6 +169,39 @@
                     android:layout_marginEnd="4dp"/>
             </LinearLayout>
 
+
+            <ImageButton
+                android:id="@+id/button_add_to_queue"
+                android:layout_width="wrap_content"
+                android:layout_height="27dp"
+                android:src="@drawable/ic_queue"
+                android:paddingTop="4dp"
+                android:paddingBottom="2dp"
+                android:paddingLeft="10dp"
+                android:paddingRight="7dp"
+                android:layout_marginLeft="5dp"
+                android:scaleType="fitCenter"
+                android:background="@drawable/edit_text_background"
+                android:contentDescription="@string/add_to_queue"
+                app:layout_constraintLeft_toRightOf="@id/button_add_to"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+            <ImageButton
+                android:id="@+id/button_add_to_watch_later"
+                android:layout_width="wrap_content"
+                android:layout_height="27dp"
+                android:contentDescription="@string/cd_button_add_to_watch_later"
+                android:src="@drawable/ic_clock_white"
+                android:paddingTop="7dp"
+                android:paddingBottom="6dp"
+                android:paddingLeft="9dp"
+                android:paddingRight="9dp"
+                android:layout_marginLeft="5dp"
+                android:scaleType="fitCenter"
+                android:background="@drawable/edit_text_background"
+                app:layout_constraintLeft_toRightOf="@id/button_add_to_queue"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
             <TextView
                 android:id="@+id/text_video_name"
                 android:layout_width="fill_parent"
@@ -181,8 +212,9 @@
                 android:textSize="13dp"
                 android:textColor="@color/white"
                 android:fontFamily="@font/inter_light"
-                tools:text="Legendary grant recipient: Marvin Wißfeld of MicroG Very loong title"
+                tools:text="Legendary grant recipient: Marvin Wißfeld of MicroG Very loong title fff"
                 android:maxLines="2"
+                android:ellipsize="end"
                 app:layout_constraintLeft_toLeftOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintRight_toRightOf="parent" />
@@ -200,7 +232,7 @@
 
             <TextView
                 android:id="@+id/text_channel_name"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:gravity="center_vertical"
@@ -214,22 +246,9 @@
                 app:layout_constraintHorizontal_bias="0"
                 app:layout_constraintHorizontal_chainStyle="packed"
                 app:layout_constraintLeft_toRightOf="@id/image_channel_thumbnail"
-                app:layout_constraintRight_toLeftOf="@id/image_neopass_channel"
+                app:layout_constraintRight_toRightOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/text_video_name"
                 android:layout_marginStart="4dp" />
-
-            <ImageView
-                android:id="@+id/image_neopass_channel"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:contentDescription="@string/neopass_channel"
-                app:srcCompat="@drawable/neopass"
-                app:layout_constraintLeft_toRightOf="@id/text_channel_name"
-                app:layout_constraintRight_toRightOf="parent"
-                app:layout_constraintTop_toTopOf="@id/text_channel_name"
-                app:layout_constraintBottom_toBottomOf="@id/text_channel_name"
-                android:layout_marginStart="4dp"
-                android:visibility="gone"/>
 
             <TextView
                 android:id="@+id/text_video_metadata"

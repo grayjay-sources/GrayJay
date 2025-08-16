@@ -9,7 +9,10 @@ import com.futo.platformplayer.api.http.server.HttpGET
 import com.futo.platformplayer.api.http.server.HttpPOST
 import com.futo.platformplayer.api.media.platforms.js.JSClient
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
+import com.futo.platformplayer.api.media.platforms.js.SourcePluginDescriptor
+import com.futo.platformplayer.api.media.platforms.js.internal.JSDocs
 import com.futo.platformplayer.api.media.platforms.js.internal.JSHttpClient
+import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.engine.V8Plugin
 import com.futo.platformplayer.engine.dev.V8RemoteObject
 import com.futo.platformplayer.engine.dev.V8RemoteObject.Companion.gsonStandard
@@ -20,24 +23,34 @@ import com.futo.platformplayer.states.StateApp
 import com.futo.platformplayer.states.StateAssets
 import com.futo.platformplayer.states.StateDeveloper
 import com.futo.platformplayer.states.StatePlatform
+import com.google.gson.ExclusionStrategy
+import com.google.gson.FieldAttributes
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonParser
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.lang.reflect.Field
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Modifier
 import java.util.UUID
+import kotlin.reflect.full.findAnnotation
+import kotlin.reflect.full.memberFunctions
+import kotlin.reflect.jvm.javaType
 import kotlin.reflect.jvm.jvmErasure
 
 class DeveloperEndpoints(private val context: Context) {
     private val TAG = "DeveloperEndpoints";
     private val _client = ManagedHttpClient();
     private var _testPlugin: V8Plugin? = null;
+    private var _testPluginFull: JSClient? = null;
     private val testPluginOrThrow: V8Plugin get() = _testPlugin ?: throw IllegalStateException("Attempted to use test plugin without plugin");
     private val _testPluginVariables: HashMap<String, V8RemoteObject> = hashMapOf();
 
-    private inline fun <reified T> createRemoteObjectArray(objs: Iterable<T>): List<V8RemoteObject> {
-        val remotes = mutableListOf<V8RemoteObject>();
+    private inline fun <reified T> createRemoteObjectArray(objs: Iterable<T>): List<V8RemoteObject?> {
+        val remotes = mutableListOf<V8RemoteObject?>();
         for(obj in objs)
-            remotes.add(createRemoteObject(obj)!!);
+            remotes.add(createRemoteObject(obj));
         return remotes;
     }
     private inline fun <reified T> createRemoteObject(obj: T): V8RemoteObject? {
@@ -79,25 +92,32 @@ class DeveloperEndpoints(private val context: Context) {
 
     //Files
     @HttpGET("/dev", "text/html")
-    val devTestHtml = StateAssets.readAsset(context, "devportal/index.html", true);
+    val devTestHtml = StateAssets.readAsset(context, "devportal/index.html");
     @HttpGET("/source.js", "application/javascript")
-    val devSourceJS = StateAssets.readAsset(context, "scripts/source.js", true);
+    val devSourceJS = StateAssets.readAsset(context, "scripts/source.js");
     @HttpGET("/dev_bridge.js", "application/javascript")
-    val devBridgeJS = StateAssets.readAsset(context, "devportal/dev_bridge.js", true);
+    val devBridgeJS = StateAssets.readAsset(context, "devportal/dev_bridge.js");
     @HttpGET("/source_docs.json", "application/json")
     val devSourceDocsJson = Json.encodeToString(JSClient.getJSDocs());
     @HttpGET("/source_docs.js", "application/javascript")
     val devSourceDocsJS = "const sourceDocs = $devSourceDocsJson";
 
+    @HttpGET("/source_doc_urls.json", "application/json")
+    fun devSourceDocUrlsJson(httpContext: HttpContext) {;
+        val docs = JSClient.getMethodDocUrls();
+        httpContext.respondCode(200, Json.encodeToString(docs), "application/json");
+    }
+    @HttpGET("/source_doc_urls.js", "application/javascript")
+    fun devSourceDocUrlsJs(httpContext: HttpContext) {;
+        val docs = JSClient.getMethodDocUrls();
+        httpContext.respondCode(200, "const sourceDocUrls = " + Json.encodeToString(docs), "application/javascript");
+    }
+
     //Dependencies
-    //@HttpGET("/dependencies/vue.js", "application/javascript")
-    //val depVue = StateAssets.readAsset(context, "devportal/dependencies/vue.js", true);
-    //@HttpGET("/dependencies/vuetify.js", "application/javascript")
-    //val depVuetify = StateAssets.readAsset(context, "devportal/dependencies/vuetify.js", true);
-    //@HttpGET("/dependencies/vuetify.min.css", "text/css")
-    //val depVuetifyCss = StateAssets.readAsset(context, "devportal/dependencies/vuetify.min.css", true);
     @HttpGET("/dependencies/FutoMainLogo.svg", "image/svg+xml")
-    val depFutoLogo = StateAssets.readAsset(context, "devportal/dependencies/FutoMainLogo.svg", true);
+    val depFutoLogo = StateAssets.readAsset(context, "devportal/dependencies/FutoMainLogo.svg");
+    @HttpGET("/favicon.svg", "image/svg+xml")
+    val favicon = StateAssets.readAsset(context, "devportal/dependencies/favicon.svg");
 
     @HttpGET("/reference_plugin.d.ts", "text/plain")
     fun devSourceTSWithRefs(httpContext: HttpContext) {
@@ -106,7 +126,7 @@ class DeveloperEndpoints(private val context: Context) {
         builder.appendLine("//Reference Scriptfile");
         builder.appendLine("//Intended exclusively for auto-complete in your IDE, not for execution");
 
-        builder.appendLine(StateAssets.readAsset(context, "devportal/plugin.d.ts", true));
+        builder.appendLine(StateAssets.readAsset(context, "devportal/plugin.d.ts"));
 
         httpContext.respondCode(200, builder.toString(), "text/plain");
     }
@@ -118,7 +138,7 @@ class DeveloperEndpoints(private val context: Context) {
         builder.appendLine("//Reference Scriptfile");
         builder.appendLine("//Intended exclusively for auto-complete in your IDE, not for execution");
 
-        builder.appendLine(StateAssets.readAsset(context, "scripts/source.js", true));
+        builder.appendLine(StateAssets.readAsset(context, "scripts/source.js"));
 
         for(pack in testPluginOrThrow.getPackages()) {
             builder.appendLine();
@@ -185,11 +205,26 @@ class DeveloperEndpoints(private val context: Context) {
         val config = context.readContentJson<SourcePluginConfig>()
         try {
             _testPluginVariables.clear();
-            _testPlugin = V8Plugin(StateApp.instance.context, config);
+
+            val client = JSHttpClient(null, null, null, config);
+            val clientAuth = JSHttpClient(null, null, null, config);
+            _testPlugin = V8Plugin(StateApp.instance.context, config, null, client, clientAuth);
+            try {
+                val script = _client.get(config.absoluteScriptUrl);
+                _testPluginFull = JSClient(StateApp.instance.context, SourcePluginDescriptor(
+                    config, null, null, null
+                ), null, script.body?.string() ?: "");
+                _testPluginFull!!.initialize();
+            }
+            catch (ex: Throwable) {
+                Logger.e(TAG, "Loading full client failed", ex);
+                _testPluginFull = null;
+            }
+
             context.respondJson(200, testPluginOrThrow.getPackageVariables());
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
     @HttpPOST("/plugin/cleanTestPlugin")
@@ -199,7 +234,7 @@ class DeveloperEndpoints(private val context: Context) {
             context.respondCode(200);
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
     @HttpPOST("/plugin/captchaTestPlugin")
@@ -221,7 +256,7 @@ class DeveloperEndpoints(private val context: Context) {
             context.respondCode(200, "Captcha started");
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
     @HttpGET("/plugin/loginTestPlugin")
@@ -235,13 +270,13 @@ class DeveloperEndpoints(private val context: Context) {
             }
             LoginActivity.showLogin(StateApp.instance.context, config) {
                 _testPluginVariables.clear();
-                _testPlugin = V8Plugin(StateApp.instance.context, config, null, JSHttpClient(null), JSHttpClient(null, it));
+                _testPlugin = V8Plugin(StateApp.instance.context, config, null, JSHttpClient(null, null, null, config), JSHttpClient(null, it, null, config));
 
             };
             context.respondCode(200, "Login started");
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
     @HttpGET("/plugin/logoutTestPlugin")
@@ -253,7 +288,7 @@ class DeveloperEndpoints(private val context: Context) {
             context.respondCode(200, "Logged out");
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
 
@@ -264,7 +299,7 @@ class DeveloperEndpoints(private val context: Context) {
             context.respondCode(200, if(isLoggedIn) "true" else "false", "application/json");
         }
         catch(ex: Throwable) {
-            context.respondCode(500, (ex::class.simpleName + ":" + ex.message) ?: "", "text/plain")
+            context.respondCode(500, (ex::class.simpleName + ":" + ex.message), "text/plain")
         }
     }
 
@@ -287,7 +322,6 @@ class DeveloperEndpoints(private val context: Context) {
     @HttpPOST("/plugin/remoteCall")
     fun pluginRemoteCall(context: HttpContext) {
         try {
-            val parameters = context.readContentString();
             val objId = context.query.get("id")
             val method = context.query.get("method")
 
@@ -299,15 +333,23 @@ class DeveloperEndpoints(private val context: Context) {
                 context.respondCode(400, "Missing method");
                 return;
             }
+            if(method != "isLoggedIn")
+                Logger.i(TAG, "Remote Call [${objId}].${method}(...)");
+
+            val parameters = context.readContentString();
+
             val remoteObj = getRemoteObject(objId);
             val paras = JsonParser.parseString(parameters);
             if(!paras.isJsonArray)
                 throw IllegalArgumentException("Expected json array as body");
-            if(method != "isLoggedIn")
-                Logger.i(TAG, "Remote Call [${objId}].${method}(...)");
             val callResult = remoteObj.call(method, paras as JsonArray);
             val json = wrapRemoteResult(callResult, false);
             context.respondCode(200, json, "application/json");
+        }
+        catch(invocation: InvocationTargetException) {
+            val innerException = invocation.targetException;
+            Logger.e("DeveloperEndpoints", innerException.message, innerException);
+            context.respondCode(500, innerException::class.simpleName + ":" + innerException.message, "text/plain")
         }
         catch(ilEx: IllegalArgumentException) {
             if(ilEx.message?.contains("does not exist") ?: false) {
@@ -315,12 +357,12 @@ class DeveloperEndpoints(private val context: Context) {
             }
             else {
                 Logger.e("DeveloperEndpoints", ilEx.message, ilEx);
-                context.respondCode(500, ilEx::class.simpleName + ":" + ilEx.message ?: "", "text/plain")
+                context.respondCode(500, ilEx::class.simpleName + ":" + ilEx.message, "text/plain")
             }
         }
         catch(ex: Throwable) {
             Logger.e("DeveloperEndpoints", ex.message, ex);
-            context.respondCode(500, ex::class.simpleName + ":" + ex.message ?: "", "text/plain")
+            context.respondCode(500, ex::class.simpleName + ":" + ex.message, "text/plain")
         }
     }
     @HttpGET("/plugin/remoteProp")
@@ -350,12 +392,12 @@ class DeveloperEndpoints(private val context: Context) {
             }
             else {
                 Logger.e("DeveloperEndpoints", ilEx.message, ilEx);
-                context.respondCode(500, ilEx::class.simpleName + ":" + ilEx.message ?: "", "text/plain")
+                context.respondCode(500, ilEx::class.simpleName + ":" + ilEx.message, "text/plain")
             }
         }
         catch(ex: Throwable) {
             Logger.e("DeveloperEndpoints", ex.message, ex);
-            context.respondCode(500, ex::class.simpleName + ":" + ex.message ?: "", "text/plain")
+            context.respondCode(500, ex::class.simpleName + ":" + ex.message, "text/plain")
         }
     }
 
@@ -386,7 +428,7 @@ class DeveloperEndpoints(private val context: Context) {
     fun pluginLoadDevPlugin(context: HttpContext) {
         val config = context.readContentJson<SourcePluginConfig>()
         try {
-            val script = _client.get(config.absoluteScriptUrl!!);
+            val script = _client.get(config.absoluteScriptUrl);
             if(!script.isOk)
                 throw IllegalStateException("URL ${config.scriptUrl} return code ${script.code}");
             if(script.body == null)
@@ -397,7 +439,26 @@ class DeveloperEndpoints(private val context: Context) {
         }
         catch(ex: Exception) {
             Logger.e("DeveloperEndpoints", ex.message, ex);
-            context.respondCode(500, ex::class.simpleName + ":" + ex.message ?: "", "text/plain")
+            context.respondCode(500, ex::class.simpleName + ":" + ex.message, "text/plain")
+        }
+    }
+    @HttpGET("/dev/setDevProxy")
+    fun devSetDevProxy(context: HttpContext) {
+        try {
+            val url = context.query.getOrDefault("url", "");
+            val port = context.query.getOrDefault("port", "");
+            if(url.isNullOrEmpty() || port.isNullOrEmpty() || port.toIntOrNull() == null)
+            {
+                StateDeveloper.instance.devProxy = null;
+                context.respondCode(400);
+                return;
+            }
+            StateDeveloper.instance.devProxy = StateDeveloper.DevProxySettings(url, port.toInt());
+            context.respondCode(200, "true", "application/json");
+        }
+        catch(ex: Exception) {
+            Logger.e("DeveloperEndpoints", ex.message, ex);
+            context.respondCode(500, ex::class.simpleName + ":" + ex.message, "text/plain")
         }
     }
 
@@ -406,6 +467,15 @@ class DeveloperEndpoints(private val context: Context) {
         try {
             val index = context.query.getOrDefault("index", "0").toInt();
             context.respondJson(200, StateDeveloper.instance.getLogs(index));
+        }
+        catch(ex: Exception) {
+            context.respondCode(500, ex.message ?: "", "text/plain")
+        }
+    }
+    @HttpGET("/plugin/getDevHttpExchanges")
+    fun pluginGetDevExchanges(context: HttpContext) {
+        try {
+            context.respondJson(200, StateDeveloper.instance.getHttpExchangesAndClear());
         }
         catch(ex: Exception) {
             context.respondCode(500, ex.message ?: "", "text/plain")
@@ -428,6 +498,68 @@ class DeveloperEndpoints(private val context: Context) {
         }
     }
 
+    private val _fieldAttributesField = FieldAttributes::class.java.getDeclaredField("field");
+    init {
+        _fieldAttributesField.isAccessible = true;
+    }
+    private val _remoteTestGson = GsonBuilder()
+        .setExclusionStrategies(object : ExclusionStrategy {
+            override fun shouldSkipClass(clazz: Class<*>?): Boolean {
+                return clazz?.simpleName == "JSClient" ||
+                    clazz?.simpleName == "KSerializer[]" ||
+                    clazz?.simpleName == "V8ValueObject";
+            }
+
+            override fun shouldSkipField(f: FieldAttributes?): Boolean {
+                val isPublic = f?.hasModifier(Modifier.PUBLIC) ?: true;
+                if(!isPublic) {
+                    val underlyingField = _fieldAttributesField.get(f) as Field;
+                    return !(underlyingField.declaringClass as Class).methods.any { it.name == "get" + underlyingField.name.replaceFirstChar { it.uppercaseChar() } && Modifier.isPublic(it.modifiers) };
+                }
+                else
+                    return !isPublic;
+            }
+        }).create();
+    @HttpPOST("/plugin/remoteTest")
+    fun pluginRemoteTest(context: HttpContext) {
+        val method = context.query.getOrDefault("method", "");
+        try {
+
+            val parameters = context.readContentString();
+            val paras = JsonParser.parseString(parameters);
+            if(!paras.isJsonArray)
+                throw IllegalArgumentException("Expected json array as body");
+
+            val plugin = _testPluginFull ?: throw IllegalStateException("Plugin not loaded");
+
+            val function = plugin::class.memberFunctions.filter { it.findAnnotation<JSDocs>() != null }
+                .find { it.name == method };
+            if(function == null)
+                throw java.lang.IllegalArgumentException("Plugin method [${function}] not found");
+            val callResult = function.call(*(listOf(plugin) + paras.asJsonArray.take(function.parameters.size - 1).mapIndexed { index, jsonElement ->
+                //For now, manual conversion.
+                val parameter = function.parameters[index + 1];
+                val value = _remoteTestGson.fromJson<Any>(jsonElement, parameter.type.javaType);
+                return@mapIndexed value;
+            }).toTypedArray());
+            val json = if(callResult is IPager<*>)
+                _remoteTestGson.toJson(callResult.getResults())
+            else
+                _remoteTestGson.toJson(callResult);
+            //val json = wrapRemoteResult(callResult, false);
+
+            context.respondCode(200, json);
+        }
+        catch(ex: InvocationTargetException) {
+            Logger.e(TAG, "Remote test for [${method}] is failed", ex.targetException);
+            context.respondCode(500, ex.targetException.message ?: "", "text/plain")
+        }
+        catch(ex: Exception) {
+            Logger.e(TAG, "Remote test for [${method}] is failed", ex);
+            context.respondCode(500, ex.message ?: "", "text/plain")
+        }
+    }
+
     //Internal calls
     @HttpPOST("/get")
     fun get(context: HttpContext) {
@@ -439,7 +571,7 @@ class DeveloperEndpoints(private val context: Context) {
             val resp = _client.get(body.url!!, body.headers);
 
             context.respondCode(200,
-                Json.encodeToString(PackageHttp.BridgeHttpResponse(resp.url, resp.code, resp.body?.string())),
+                Json.encodeToString(PackageHttp.BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string())),
                 context.query.getOrDefault("CT", "text/plain"));
         }
         catch(ex: Exception) {

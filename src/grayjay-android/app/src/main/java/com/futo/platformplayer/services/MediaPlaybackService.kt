@@ -1,6 +1,10 @@
 package com.futo.platformplayer.services
 
-import android.app.*
+import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -10,23 +14,29 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.AudioManager.OnAudioFocusChangeListener
 import android.media.MediaMetadata
+import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
-import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.R
-import com.futo.platformplayer.states.StatePlatform
-import com.futo.platformplayer.states.StatePlayer
+import com.futo.platformplayer.Settings
 import com.futo.platformplayer.activities.MainActivity
 import com.futo.platformplayer.api.media.models.video.IPlatformVideo
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.receivers.MediaButtonReceiver
 import com.futo.platformplayer.receivers.MediaControlReceiver
+import com.futo.platformplayer.states.StatePlatform
+import com.futo.platformplayer.states.StatePlayer
 import com.futo.platformplayer.stores.FragmentedStorage
 
 class MediaPlaybackService : Service() {
@@ -47,7 +57,15 @@ class MediaPlaybackService : Service() {
     private var _notificationChannel: NotificationChannel? = null;
     private var _mediaSession: MediaSessionCompat? = null;
     private var _hasFocus: Boolean = false;
+    private var _isTransientLoss: Boolean = false;
     private var _focusRequest: AudioFocusRequest? = null;
+    private var _audioFocusLossTime_ms: Long? = null
+    private var _playbackState = PlaybackStateCompat.STATE_NONE;
+    private var _lastAudioFocusAttempt_ms: Long? = null
+    private val isPlaying get() = _playbackState != PlaybackStateCompat.STATE_PAUSED &&
+        _playbackState != PlaybackStateCompat.STATE_STOPPED &&
+        _playbackState != PlaybackStateCompat.STATE_NONE &&
+        _playbackState != PlaybackStateCompat.STATE_ERROR
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Logger.v(TAG, "onStartCommand");
@@ -75,6 +93,7 @@ class MediaPlaybackService : Service() {
 
         return START_STICKY;
     }
+
     fun setupNotificationRequirements() {
         _audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager;
         _notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager;
@@ -85,10 +104,11 @@ class MediaPlaybackService : Service() {
         _notificationManager!!.createNotificationChannel(_notificationChannel!!);
 
         _mediaSession = MediaSessionCompat(this, "PlayerState");
+        _mediaSession?.isActive = true
         _mediaSession?.setPlaybackState(PlaybackStateCompat.Builder()
             .setState(PlaybackStateCompat.STATE_PLAYING, 0, 1f)
             .build());
-        _mediaSession?.setCallback(object: MediaSessionCompat.Callback() {
+        _mediaSession?.setCallback(object : MediaSessionCompat.Callback() {
             override fun onSeekTo(pos: Long) {
                 super.onSeekTo(pos)
                 Logger.i(TAG, "Media session callback onSeekTo(pos = $pos)");
@@ -110,7 +130,9 @@ class MediaPlaybackService : Service() {
             override fun onStop() {
                 super.onStop();
                 Logger.i(TAG, "Media session callback onStop()");
-                MediaControlReceiver.onCloseReceived.emit();
+                //MediaControlReceiver.onCloseReceived.emit();
+                MediaControlReceiver.onPauseReceived.emit();
+                updateMediaSession( null);
             }
 
             override fun onSkipToPrevious() {
@@ -125,6 +147,12 @@ class MediaPlaybackService : Service() {
                 MediaControlReceiver.onNextReceived.emit();
             }
         });
+        _mediaSession?.setMediaButtonReceiver(PendingIntent.getBroadcast(
+            this@MediaPlaybackService,
+            0,
+            Intent(Intent.ACTION_MEDIA_BUTTON).setClass(this@MediaPlaybackService, MediaButtonReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        ))
     }
 
     override fun onCreate() {
@@ -135,7 +163,7 @@ class MediaPlaybackService : Service() {
     override fun onDestroy() {
         Logger.v(TAG, "onDestroy");
         _instance = null;
-        MediaControlReceiver.onCloseReceived.emit();
+        MediaControlReceiver.onPauseReceived.emit();
         super.onDestroy();
     }
 
@@ -145,16 +173,13 @@ class MediaPlaybackService : Service() {
 
     fun closeMediaSession() {
         Logger.v(TAG, "closeMediaSession");
-        stopForeground(true);
+        stopForeground(STOP_FOREGROUND_REMOVE);
 
-        val focusRequest = _focusRequest;
-        if (focusRequest != null) {
-            _audioManager?.abandonAudioFocusRequest(focusRequest);
-            _focusRequest = null;
-        }
-        _hasFocus = false;
+        abandonAudioFocus()
 
-        _notificationManager?.cancel(MEDIA_NOTIF_ID);
+        val notifManager = _notificationManager;
+        Logger.i(TAG, "Cancelling playback notification (notifManager: ${notifManager != null})");
+        notifManager?.cancel(MEDIA_NOTIF_ID);
         _notif_last_video = null;
         _notif_last_bitmap = null;
         _mediaSession = null;
@@ -168,10 +193,12 @@ class MediaPlaybackService : Service() {
         Logger.v(TAG, "updateMediaSession");
         var isUpdating = false;
         val video: IPlatformVideo;
+        var lastBitmap: Bitmap? = null
         if(videoUpdated == null) {
             val notifLastVideo = _notif_last_video ?: return;
             video = notifLastVideo;
             isUpdating = true;
+            lastBitmap = _notif_last_bitmap;
         }
         else
             video = videoUpdated;
@@ -184,6 +211,7 @@ class MediaPlaybackService : Service() {
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, video.author.name)
                 .putString(MediaMetadata.METADATA_KEY_TITLE, video.name)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, video.duration * 1000)
+                .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, lastBitmap)
                 .build());
 
         val thumbnail = video.thumbnails.getHQThumbnail();
@@ -199,8 +227,16 @@ class MediaPlaybackService : Service() {
                 .load(thumbnail)
                 .into(object: CustomTarget<Bitmap>() {
                     override fun onResourceReady(resource: Bitmap,transition: Transition<in Bitmap>?) {
-                        if(tag == _notif_last_video)
+                        if(tag == _notif_last_video) {
                             notifyMediaSession(video, resource)
+                            _mediaSession?.setMetadata(
+                                MediaMetadataCompat.Builder()
+                                    .putString(MediaMetadata.METADATA_KEY_ARTIST, video.author.name)
+                                    .putString(MediaMetadata.METADATA_KEY_TITLE, video.name)
+                                    .putLong(MediaMetadata.METADATA_KEY_DURATION, video.duration * 1000)
+                                    .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, resource)
+                                    .build());
+                        }
                     }
                     override fun onLoadCleared(placeholder: Drawable?) {
                         if(tag == _notif_last_video)
@@ -211,7 +247,7 @@ class MediaPlaybackService : Service() {
         else
             notifyMediaSession(video, null);
     }
-    private fun generateMediaAction(context: Context, icon: Int, title: String, intent: PendingIntent) : NotificationCompat.Action {
+    private fun generateMediaAction(icon: Int, title: String, intent: PendingIntent) : NotificationCompat.Action {
         return NotificationCompat.Action.Builder(icon, title, intent).build();
     }
     private fun notifyMediaSession(video: IPlatformVideo?, desiredBitmap: Bitmap?) {
@@ -243,30 +279,50 @@ class MediaPlaybackService : Service() {
             .setSilent(true)
             .setContentIntent(PendingIntent.getActivity(this, 5, bringUpIntent, PendingIntent.FLAG_IMMUTABLE))
             .setStyle(if(hasQueue)
-                    androidx.media.app.NotificationCompat.MediaStyle()
-                        .setMediaSession(session.sessionToken)
-                        .setShowActionsInCompactView(0, 1, 2)
-                else
-                    androidx.media.app.NotificationCompat.MediaStyle()
-                        .setMediaSession(session.sessionToken)
-                        .setShowActionsInCompactView(0))
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0, 1, 2)
+            else
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0))
             .setDeleteIntent(deleteIntent)
             .setChannelId(channel.id)
 
         val playWhenReady = StatePlayer.instance.isPlaying;
 
         if(hasQueue)
-            builder = builder.addAction(generateMediaAction(this, R.drawable.ic_fast_rewind_notif, "Back", MediaControlReceiver.getPrevIntent(this, 3)))
+            builder = builder.addAction(generateMediaAction(
+                R.drawable.ic_fast_rewind_notif,
+                "Back",
+                MediaControlReceiver.getPrevIntent(this, 3)
+            ))
 
         if(playWhenReady)
-            builder = builder.addAction(generateMediaAction(this, R.drawable.ic_pause_notif, "Pause", MediaControlReceiver.getPauseIntent(this, 2)));
+            builder = builder.addAction(generateMediaAction(
+                R.drawable.ic_pause_notif,
+                "Pause",
+                MediaControlReceiver.getPauseIntent(this, 2)
+            ));
         else
-            builder = builder.addAction(generateMediaAction(this, R.drawable.ic_play_notif, "Play", MediaControlReceiver.getPlayIntent(this, 1)));
+            builder = builder.addAction(generateMediaAction(
+                R.drawable.ic_play_notif,
+                "Play",
+                MediaControlReceiver.getPlayIntent(this, 1)
+            ));
 
         if(hasQueue)
-            builder = builder.addAction(generateMediaAction(this, R.drawable.ic_fast_forward_notif, "Forward", MediaControlReceiver.getNextIntent(this, 4)));
+            builder = builder.addAction(generateMediaAction(
+                R.drawable.ic_fast_forward_notif,
+                "Forward",
+                MediaControlReceiver.getNextIntent(this, 4)
+            ));
 
-        builder = builder.addAction(generateMediaAction(this, R.drawable.ic_stop_notif, "Stop", MediaControlReceiver.getCloseIntent(this, 5)));
+        builder = builder.addAction(generateMediaAction(
+            R.drawable.ic_stop_notif,
+            "Stop",
+            MediaControlReceiver.getCloseIntent(this, 5)
+        ));
 
         if(bitmap?.isRecycled ?: false)
             bitmap = null;
@@ -278,7 +334,11 @@ class MediaPlaybackService : Service() {
 
         Logger.i(TAG, "Updating notification bitmap=${if (bitmap != null) "yes" else "no."} channelId=${channel.id} icon=${icon} video=${video?.name ?: ""} playWhenReady=${playWhenReady} session.sessionToken=${session.sessionToken}");
 
-        startForeground(MEDIA_NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(MEDIA_NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        } else {
+            startForeground(MEDIA_NOTIF_ID, notif);
+        }
 
         _notif_last_bitmap = bitmap;
     }
@@ -286,38 +346,84 @@ class MediaPlaybackService : Service() {
     fun updateMediaSessionPlaybackState(state: Int, pos: Long) {
         _mediaSession?.setPlaybackState(
             PlaybackStateCompat.Builder()
-            .setActions(
-                PlaybackStateCompat.ACTION_SEEK_TO or
-                PlaybackStateCompat.ACTION_PLAY or
-                PlaybackStateCompat.ACTION_PAUSE or
-                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                PlaybackStateCompat.ACTION_PLAY_PAUSE
-            )
-            .setState(state, pos, 1f, SystemClock.elapsedRealtime())
-            .build());
+                .setActions(
+                    PlaybackStateCompat.ACTION_SEEK_TO or
+                            PlaybackStateCompat.ACTION_PLAY or
+                            PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE
+                )
+                .setState(state, pos, 1f, SystemClock.elapsedRealtime())
+                .build());
 
-        if(_focusRequest == null)
-            setAudioFocus();
+        _playbackState = state;
+        try {
+            setAudioFocus()
+        } catch (e: Throwable) {
+            Logger.e(TAG, "Failed to set audio focus", e)
+        }
     }
 
     //TODO: (TBD) This code probably more fitting inside FutoVideoPlayer, as this service is generally only used for global events
     private fun setAudioFocus() {
-        Log.i(TAG, "Requested audio focus.");
+        if (!isPlaying) {
+            return
+        }
 
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAcceptsDelayedFocusGain(true)
-            .setOnAudioFocusChangeListener(_audioFocusChangeListener)
-            .build()
+        if (_hasFocus || _isTransientLoss) {
+            return;
+        }
 
-        _focusRequest = focusRequest;
-        val result = _audioManager?.requestAudioFocus(focusRequest)
+        val now = System.currentTimeMillis()
+        val lastAudioFocusAttempt_ms = _lastAudioFocusAttempt_ms
+        if (lastAudioFocusAttempt_ms == null || now - lastAudioFocusAttempt_ms > 1000) {
+            _lastAudioFocusAttempt_ms = now
+        } else {
+            Log.v(TAG, "Skipped trying to get audio focus because gaining audio focus was recently attempted.");
+            return
+        }
+
+        if (_focusRequest == null) {
+            val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener(_audioFocusChangeListener)
+                .build()
+
+            _focusRequest = focusRequest;
+            Log.i(TAG, "Created audio focus request.");
+        }
+
+        Log.i(TAG, "Requesting audio focus.");
+
+        val result = _audioManager?.requestAudioFocus(_focusRequest!!)
         Log.i(TAG, "Audio focus request result $result");
         if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            //TODO: Handle when not possible to get audio focus
-            _hasFocus = true;
+            _hasFocus = true
+            _isTransientLoss = false
             Log.i(TAG, "Audio focus received");
+        } else if (result == AudioManager.AUDIOFOCUS_REQUEST_DELAYED) {
+            _hasFocus = false
+            _isTransientLoss = false
+            Log.i(TAG, "Audio focus delayed, waiting for focus")
+        } else {
+            _hasFocus = false
+            _isTransientLoss = false
+            Log.i(TAG, "Audio focus not granted, retrying later")
         }
+
+        Log.i(TAG, "Audio focus requested.");
+    }
+
+    private fun abandonAudioFocus() {
+        val focusRequest = _focusRequest;
+        if (focusRequest != null) {
+            Logger.i(TAG, "Audio focus abandoned")
+            _audioManager?.abandonAudioFocusRequest(focusRequest);
+            _focusRequest = null;
+        }
+        _hasFocus = false;
+        _isTransientLoss = false;
     }
 
     private val _audioFocusChangeListener =
@@ -325,32 +431,52 @@ class MediaPlaybackService : Service() {
             try {
                 when (focusChange) {
                     AudioManager.AUDIOFOCUS_GAIN -> {
-                        //Do not start playing on gaining audo focus
-                        //MediaControlReceiver.onPlayReceived.emit();
                         _hasFocus = true;
-                        Log.i(TAG, "Audio focus gained");
+                        _isTransientLoss = false;
+
+                        val audioFocusLossDuration = _audioFocusLossTime_ms?.let { System.currentTimeMillis() - it }
+                        _audioFocusLossTime_ms = null
+                        Log.i(TAG, "Audio focus gained (restartPlaybackAfterLoss = ${Settings.instance.playback.restartPlaybackAfterLoss}, _audioFocusLossTime_ms = $_audioFocusLossTime_ms, audioFocusLossDuration = ${audioFocusLossDuration})");
+
+                        if (Settings.instance.playback.restartPlaybackAfterLoss == 1) {
+                            if (audioFocusLossDuration != null && audioFocusLossDuration < 1000 * 10) {
+                                MediaControlReceiver.onPlayReceived.emit()
+                            }
+                        } else if (Settings.instance.playback.restartPlaybackAfterLoss == 2) {
+                            if (audioFocusLossDuration != null && audioFocusLossDuration < 1000 * 30) {
+                                MediaControlReceiver.onPlayReceived.emit()
+                            }
+                        } else if (Settings.instance.playback.restartPlaybackAfterLoss == 3) {
+                            MediaControlReceiver.onPlayReceived.emit()
+                        }
                     }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        _audioFocusLossTime_ms = if (isPlaying) {
+                            System.currentTimeMillis()
+                        } else {
+                            null
+                        }
+
+                        _hasFocus = false;
+                        _isTransientLoss = true;
                         MediaControlReceiver.onPauseReceived.emit();
-                        Log.i(TAG, "Audio focus transient loss");
+                        Log.i(TAG, "Audio focus transient loss (_audioFocusLossTime_ms = ${_audioFocusLossTime_ms})");
                     }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                         Log.i(TAG, "Audio focus transient loss, can duck");
+                        _hasFocus = true;
+                        _isTransientLoss = true;
                     }
                     AudioManager.AUDIOFOCUS_LOSS -> {
-                        _hasFocus = false;
-                        MediaControlReceiver.onPauseReceived.emit();
-                        Log.i(TAG, "Audio focus lost");
-
-                        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                        val runningAppProcesses = activityManager.runningAppProcesses
-                        for (processInfo in runningAppProcesses) {
-                            // Check the importance of the running app process
-                            if (processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
-                                // This app is in the foreground, which might have caused the loss of audio focus
-                                Log.i("AudioFocus", "App ${processInfo.processName} might have caused the loss of audio focus")
-                            }
+                        _audioFocusLossTime_ms = if (isPlaying) {
+                            System.currentTimeMillis()
+                        } else {
+                            null
                         }
+
+                        MediaControlReceiver.onPauseReceived.emit();
+                        abandonAudioFocus();
+                        Log.i(TAG, "Audio focus lost");
                     }
                 }
             } catch(ex: Throwable) {

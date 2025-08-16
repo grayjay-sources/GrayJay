@@ -7,18 +7,21 @@ import com.caoccao.javet.enums.V8ConversionMode
 import com.caoccao.javet.enums.V8ProxyMode
 import com.caoccao.javet.interop.V8Runtime
 import com.caoccao.javet.values.V8Value
+import com.caoccao.javet.values.primitive.V8ValueString
 import com.caoccao.javet.values.reference.V8ValueObject
-import com.futo.platformplayer.logging.Logger
+import com.caoccao.javet.values.reference.V8ValueTypedArray
 import com.futo.platformplayer.api.http.ManagedHttpClient
+import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
 import com.futo.platformplayer.api.media.platforms.js.internal.JSHttpClient
 import com.futo.platformplayer.engine.IV8PluginConfig
 import com.futo.platformplayer.engine.V8Plugin
 import com.futo.platformplayer.engine.internal.IV8Convertable
 import com.futo.platformplayer.engine.internal.V8BindObject
-import com.futo.platformplayer.getOrThrow
-import kotlinx.coroutines.CoroutineScope
+import com.futo.platformplayer.invokeV8Void
+import com.futo.platformplayer.logging.Logger
 import java.net.SocketTimeoutException
-import kotlin.streams.toList
+import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.ForkJoinTask
 
 class PackageHttp: V8Package {
     @Transient
@@ -36,6 +39,23 @@ class PackageHttp: V8Package {
     override val name: String get() = "Http";
     override val variableName: String get() = "http";
 
+    private var _batchPoolLock: Any = Any();
+    private var _batchPool: ForkJoinPool? = null;
+
+    private val aliveSockets = mutableListOf<SocketResult>();
+    private var _cleanedUp = false;
+
+    private val _clients = mutableMapOf<String, PackageHttpClient>()
+
+    fun getClient(id: String?): PackageHttpClient {
+        if(id == null)
+            throw IllegalArgumentException("Http client ${id} doesn't exist");
+        if(_packageClient.clientId() == id)
+            return _packageClient;
+        if(_packageClientAuth.clientId() == id)
+            return _packageClientAuth;
+        return _clients.getOrDefault(id, null) ?: throw IllegalArgumentException("Http client ${id} doesn't exist");
+    }
 
     constructor(plugin: V8Plugin, config: IV8PluginConfig): super(plugin) {
         _config = config;
@@ -45,9 +65,68 @@ class PackageHttp: V8Package {
         _packageClientAuth = PackageHttpClient(this, _clientAuth);
     }
 
+    fun cleanup(){
+        Logger.w(TAG, "PackageHttp Cleaning up")
+        val sockets = synchronized(aliveSockets) { aliveSockets.toList() }
+        _cleanedUp = true;
+        for(socket in sockets){
+            try {
+                Logger.w(TAG, "PackageHttp Socket Cleaned Up");
+                socket.close(1001, "Cleanup");
+            }
+            catch(ex: Throwable) {
+                Logger.e(TAG, "Failed to close socket", ex);
+            }
+        }
+        if(sockets.size > 0) {
+            //Thread.sleep(100); //Give sockets a bit
+        }
+        synchronized(aliveSockets) {
+            aliveSockets.clear();
+        }
+    }
+
+
+    /*
+    Automatically adjusting threadpool dedicated per PackageHttp for batch requests.
+     */
+    private fun <T, R> autoParallelPool(data: List<T>, parallelism: Int, handle: (T)->R): List<Pair<R?, Throwable?>> {
+        synchronized(_batchPoolLock) {
+            val threadsToUse = if (parallelism <= 0) data.size else Math.min(parallelism, data.size);
+            if(_batchPool == null)
+                _batchPool = ForkJoinPool(threadsToUse);
+            var pool = _batchPool ?: return listOf();
+            if(pool.poolSize < threadsToUse) { //Resize pool
+                pool.shutdown();
+                _batchPool = ForkJoinPool(threadsToUse);
+                pool = _batchPool ?: return listOf();
+            }
+
+            val resultTasks = mutableListOf<ForkJoinTask<Pair<R?, Throwable?>>>();
+            for(item in data){
+                resultTasks.add(pool.submit<Pair<R?, Throwable?>> {
+                      try {
+                          return@submit Pair<R?, Throwable?>(handle(item), null);
+                      }
+                      catch(ex: Throwable) {
+                          return@submit Pair<R?, Throwable?>(null, ex);
+                      }
+                });
+            }
+            return resultTasks.map { it.join() };
+        }
+    }
+
     @V8Function
     fun newClient(withAuth: Boolean): PackageHttpClient {
-        return PackageHttpClient(this, if(withAuth) _clientAuth.clone() else _client.clone());
+        val httpClient = if(withAuth) _clientAuth.clone() else _client.clone();
+        if(httpClient is JSHttpClient)
+            _plugin.registerHttpClient(httpClient);
+        val client = PackageHttpClient(this, httpClient);
+
+        _clients.put(client.clientId() ?: "", client);
+
+        return client;
     }
     @V8Function
     fun getDefaultClient(withAuth: Boolean): PackageHttpClient {
@@ -60,33 +139,44 @@ class PackageHttp: V8Package {
     }
 
     @V8Function
-    fun request(method: String, url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BridgeHttpResponse {
+    fun request(method: String, url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false, bytesResult: Boolean = false) : IBridgeHttpResponse {
         return if(useAuth)
-            _packageClientAuth.request(method, url, headers)
+            _packageClientAuth.requestInternal(method, url, headers, if(bytesResult) ReturnType.BYTES else ReturnType.STRING)
         else
-            _packageClient.request(method, url, headers);
+            _packageClient.requestInternal(method, url, headers, if(bytesResult) ReturnType.BYTES else ReturnType.STRING);
     }
 
     @V8Function
-    fun requestWithBody(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BridgeHttpResponse {
+    fun requestWithBody(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false, bytesResult: Boolean = false) : IBridgeHttpResponse {
         return if(useAuth)
-            _packageClientAuth.requestWithBody(method, url, body, headers)
+            _packageClientAuth.requestWithBodyInternal(method, url, body, headers, if(bytesResult) ReturnType.BYTES else ReturnType.STRING)
         else
-            _packageClient.requestWithBody(method, url, body, headers);
+            _packageClient.requestWithBodyInternal(method, url, body, headers, if(bytesResult) ReturnType.BYTES else ReturnType.STRING);
     }
     @V8Function
-    fun GET(url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BridgeHttpResponse {
+    fun GET(url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false, useByteResponse: Boolean = false) : IBridgeHttpResponse {
         return if(useAuth)
-            _packageClientAuth.GET(url, headers)
+            _packageClientAuth.GETInternal(url, headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING)
         else
-            _packageClient.GET(url, headers);
+            _packageClient.GETInternal(url, headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
     }
     @V8Function
-    fun POST(url: String, body: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BridgeHttpResponse {
-        return if(useAuth)
-            _packageClientAuth.POST(url, body, headers)
+    fun POST(url: String, body: Any, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false, useByteResponse: Boolean = false) : IBridgeHttpResponse {
+
+        val client = if(useAuth) _packageClientAuth else _packageClient;
+
+        if(body is V8ValueString)
+            return client.POSTInternal(url, body.value, headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
+        else if(body is String)
+            return client.POSTInternal(url, body, headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
+        else if(body is V8ValueTypedArray)
+            return client.POSTInternal(url, body.toBytes(), headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
+        else if(body is ByteArray)
+            return client.POSTInternal(url, body, headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
+        else if(body is ArrayList<*>) //Avoid this case, used purely for testing
+            return client.POSTInternal(url, body.map { (it as Double).toInt().toByte() }.toByteArray(), headers, if(useByteResponse) ReturnType.BYTES else ReturnType.STRING);
         else
-            _packageClient.POST(url, body, headers);
+            throw NotImplementedError("Body type " + body?.javaClass?.name?.toString() + " not implemented for POST");
     }
 
     @V8Function
@@ -107,8 +197,19 @@ class PackageHttp: V8Package {
         }
     }
 
+    interface IBridgeHttpResponse {
+        val url: String;
+        val code: Int;
+        val headers: Map<String, List<String>>?;
+    }
+
     @kotlinx.serialization.Serializable
-    class BridgeHttpResponse(val url: String, val code: Int, val body: String?, val headers: Map<String, List<String>>? = null) : IV8Convertable {
+    class BridgeHttpStringResponse(
+        override val url: String,
+        override val code: Int, val
+        body: String?,
+        override val headers: Map<String, List<String>>? = null) : IV8Convertable, IBridgeHttpResponse {
+
         val isOk = code >= 200 && code < 300;
 
         override fun toV8(runtime: V8Runtime): V8Value? {
@@ -116,6 +217,35 @@ class PackageHttp: V8Package {
             obj.set("url", url);
             obj.set("code", code);
             obj.set("body", body);
+            obj.set("headers", headers);
+            obj.set("isOk", isOk);
+            return obj;
+        }
+    }
+    @kotlinx.serialization.Serializable
+    class BridgeHttpBytesResponse: IV8Convertable, IBridgeHttpResponse {
+        override val url: String;
+        override val code: Int;
+        val body: ByteArray?;
+        override val headers: Map<String, List<String>>?;
+
+        val isOk: Boolean;
+
+        constructor(url: String, code: Int, body: ByteArray? = null, headers: Map<String, List<String>>? = null) {
+            this.url = url;
+            this.code = code;
+            this.body = body;
+            this.headers = headers;
+            this.isOk = code >= 200 && code < 300;
+        }
+
+        override fun toV8(runtime: V8Runtime): V8Value? {
+            val obj = runtime.createV8ValueObject();
+            obj.set("url", url);
+            obj.set("code", code);
+            if(body != null) {
+                obj.set("body", body);
+            }
             obj.set("headers", headers);
             obj.set("isOk", isOk);
             return obj;
@@ -130,47 +260,60 @@ class PackageHttp: V8Package {
 
         @V8Function
         fun request(method: String, url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BatchBuilder {
-            return clientRequest(_package.getDefaultClient(useAuth), method, url, headers);
+            return clientRequest(_package.getDefaultClient(useAuth).clientId(), method, url, headers);
         }
         @V8Function
         fun requestWithBody(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BatchBuilder {
-            return clientRequestWithBody(_package.getDefaultClient(useAuth), method, url, body, headers);
+            return clientRequestWithBody(_package.getDefaultClient(useAuth).clientId(), method, url, body, headers);
         }
         @V8Function
         fun GET(url: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BatchBuilder
-            = clientGET(_package.getDefaultClient(useAuth), url, headers);
+            = clientGET(_package.getDefaultClient(useAuth).clientId(), url, headers);
         @V8Function
         fun POST(url: String, body: String, headers: MutableMap<String, String> = HashMap(), useAuth: Boolean = false) : BatchBuilder
-            = clientPOST(_package.getDefaultClient(useAuth), url, body, headers);
+            = clientPOST(_package.getDefaultClient(useAuth).clientId(), url, body, headers);
+
+        @V8Function
+        fun DUMMY(): BatchBuilder {
+            _reqs.add(Pair(_package.getDefaultClient(false), RequestDescriptor("DUMMY", "", mutableMapOf())));
+            return BatchBuilder(_package, _reqs);
+        }
 
         //Client-specific
 
         @V8Function
-        fun clientRequest(client: PackageHttpClient, method: String, url: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder {
-            _reqs.add(Pair(client, RequestDescriptor(method, url, headers)));
+        fun clientRequest(clientId: String?, method: String, url: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder {
+            _reqs.add(Pair(_package.getClient(clientId), RequestDescriptor(method, url, headers)));
             return BatchBuilder(_package, _reqs);
         }
         @V8Function
-        fun clientRequestWithBody(client: PackageHttpClient, method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder {
-            _reqs.add(Pair(client, RequestDescriptor(method, url, headers, body)));
+        fun clientRequestWithBody(clientId: String?, method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder {
+            _reqs.add(Pair(_package.getClient(clientId), RequestDescriptor(method, url, headers, body)));
             return BatchBuilder(_package, _reqs);
         }
         @V8Function
-        fun clientGET(client: PackageHttpClient, url: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder
-                = clientRequest(client, "GET", url, headers);
+        fun clientGET(clientId: String?, url: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder
+                = clientRequest(clientId, "GET", url, headers);
         @V8Function
-        fun clientPOST(client: PackageHttpClient, url: String, body: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder
-                = clientRequestWithBody(client, "POST", url, body, headers);
+        fun clientPOST(clientId: String?, url: String, body: String, headers: MutableMap<String, String> = HashMap()) : BatchBuilder
+                = clientRequestWithBody(clientId, "POST", url, body, headers);
 
 
         //Finalizer
         @V8Function
-        fun execute(): List<BridgeHttpResponse> {
-            return _reqs.parallelStream().map {
+        fun execute(): List<IBridgeHttpResponse?> {
+            return _package.autoParallelPool(_reqs, -1) {
+                if(it.second.method == "DUMMY")
+                    return@autoParallelPool null;
                 if(it.second.body != null)
-                    return@map it.first.requestWithBody(it.second.method, it.second.url, it.second.body!!, it.second.headers);
+                    return@autoParallelPool it.first.requestWithBodyInternal(it.second.method, it.second.url, it.second.body!!, it.second.headers, it.second.respType);
                 else
-                    return@map it.first.request(it.second.method, it.second.url, it.second.headers);
+                    return@autoParallelPool it.first.requestInternal(it.second.method, it.second.url, it.second.headers, it.second.respType);
+            }.map {
+                if(it.second != null)
+                    throw it.second!!;
+                else
+                    return@map it.first;
             }.toList();
         }
     }
@@ -185,102 +328,205 @@ class PackageHttp: V8Package {
         @Transient
         private val _client: ManagedHttpClient;
 
+        val parentConfig: IV8PluginConfig get() = _package._config;
+
         @Transient
         private val _defaultHeaders = mutableMapOf<String, String>();
+        @Transient
+        private val _clientId: String?;
+
+
+        @V8Property
+        fun clientId(): String? {
+            return _clientId;
+        }
+
 
         constructor(pack: PackageHttp, baseClient: ManagedHttpClient): super() {
             _package = pack;
             _client = baseClient;
+            _clientId = if(_client is JSHttpClient) _client.clientId else null;
         }
 
         @V8Function
-        fun setDefaultHeaders(defaultHeaders: Map<String, String>): PackageHttpClient {
+        fun resetAuthCookies(){
+            if(_client is JSHttpClient)
+                _client.resetAuthCookies();
+        }
+        @V8Function
+        fun clearOtherCookies(){
+            if(_client is JSHttpClient)
+                _client.clearOtherCookies();
+        }
+
+        @V8Function
+        fun setDefaultHeaders(defaultHeaders: Map<String, String>) {
             for(pair in defaultHeaders)
                 _defaultHeaders[pair.key] = pair.value;
-            return this;
         }
         @V8Function
-        fun setDoApplyCookies(apply: Boolean): PackageHttpClient {
+        fun setDoApplyCookies(apply: Boolean) {
             if(_client is JSHttpClient)
                 _client.doApplyCookies = apply;
-            return this;
         }
         @V8Function
-        fun setDoUpdateCookies(update: Boolean): PackageHttpClient {
+        fun setDoUpdateCookies(update: Boolean) {
             if(_client is JSHttpClient)
                 _client.doUpdateCookies = update;
-            return this;
         }
         @V8Function
-        fun setDoAllowNewCookies(allow: Boolean): PackageHttpClient {
+        fun setDoAllowNewCookies(allow: Boolean) {
             if(_client is JSHttpClient)
                 _client.doAllowNewCookies = allow;
-            return this;
+        }
+        @V8Function
+        fun setTimeout(timeoutMs: Int) {
+            if(_client is JSHttpClient) {
+                _client.setTimeout(timeoutMs.toLong());
+            }
         }
 
         @V8Function
-        fun request(method: String, url: String, headers: MutableMap<String, String> = HashMap()) : BridgeHttpResponse {
+        fun request(method: String, url: String, headers: MutableMap<String, String> = HashMap(), useBytes: Boolean = false) : IBridgeHttpResponse
+            = requestInternal(method, url, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+        fun requestInternal(method: String, url: String, headers: MutableMap<String, String> = HashMap(), returnType: ReturnType) : IBridgeHttpResponse {
             applyDefaultHeaders(headers);
             return logExceptions {
                 return@logExceptions catchHttp {
                     val client = _client;
-                    logRequest(method, url, headers, null);
+                    //logRequest(method, url, headers, null);
                     val resp = client.requestMethod(method, url, headers);
-                    val responseBody = resp.body?.string();
-                    logResponse(method, url, resp.code, resp.headers, responseBody);
-                    return@catchHttp BridgeHttpResponse(resp.url, resp.code, responseBody, sanitizeResponseHeaders(resp.headers));
+                    //logResponse(method, url, resp.code, resp.headers, responseBody);
+                    return@catchHttp when(returnType) {
+                        ReturnType.STRING -> BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        ReturnType.BYTES -> BridgeHttpBytesResponse(resp.url, resp.code, resp.body?.bytes(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        else -> throw NotImplementedError("Return type " + returnType.toString() + " not implemented");
+                    }
                 }
             };
         }
         @V8Function
-        fun requestWithBody(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap()) : BridgeHttpResponse {
+        fun requestWithBody(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap(), useBytes: Boolean = false) : IBridgeHttpResponse
+            = requestWithBodyInternal(method, url, body, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING)
+        fun requestWithBodyInternal(method: String, url: String, body:String, headers: MutableMap<String, String> = HashMap(), returnType: ReturnType) : IBridgeHttpResponse {
             applyDefaultHeaders(headers);
             return logExceptions {
                 catchHttp {
                     val client = _client;
-                    logRequest(method, url, headers, body);
+                    //logRequest(method, url, headers, body);
                     val resp = client.requestMethod(method, url, body, headers);
-                    val responseBody = resp.body?.string();
-                    logResponse(method, url, resp.code, resp.headers, responseBody);
-                    return@catchHttp BridgeHttpResponse(resp.url, resp.code, responseBody, sanitizeResponseHeaders(resp.headers));
+                    //logResponse(method, url, resp.code, resp.headers, responseBody);
+
+                    return@catchHttp when(returnType) {
+                        ReturnType.STRING -> BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        ReturnType.BYTES -> BridgeHttpBytesResponse(resp.url, resp.code, resp.body?.bytes(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        else -> throw NotImplementedError("Return type " + returnType.toString() + " not implemented");
+                    }
                 }
             };
         }
 
         @V8Function
-        fun GET(url: String, headers: MutableMap<String, String> = HashMap()) : BridgeHttpResponse {
+        fun GET(url: String, headers: MutableMap<String, String> = HashMap(), useBytes: Boolean = false) : IBridgeHttpResponse
+            = GETInternal(url, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING)
+        fun GETInternal(url: String, headers: MutableMap<String, String> = HashMap(), returnType: ReturnType = ReturnType.STRING) : IBridgeHttpResponse {
             applyDefaultHeaders(headers);
             return logExceptions {
                 catchHttp {
                     val client = _client;
-                    logRequest("GET", url, headers, null);
+                    //logRequest("GET", url, headers, null);
                     val resp = client.get(url, headers);
-                    val responseBody = resp.body?.string();
-                    logResponse("GET", url, resp.code, resp.headers, responseBody);
-                    return@catchHttp BridgeHttpResponse(resp.url, resp.code, responseBody, sanitizeResponseHeaders(resp.headers));
+                    //val responseBody = resp.body?.string();
+                    //logResponse("GET", url, resp.code, resp.headers, responseBody);
+
+
+                    return@catchHttp when(returnType) {
+                        ReturnType.STRING -> BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        ReturnType.BYTES -> BridgeHttpBytesResponse(resp.url, resp.code, resp.body?.bytes(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        else -> throw NotImplementedError("Return type " + returnType.toString() + " not implemented");
+                    }
                 }
             };
         }
         @V8Function
-        fun POST(url: String, body: String, headers: MutableMap<String, String> = HashMap()) : BridgeHttpResponse {
+        fun POST(url: String, body: Any, headers: MutableMap<String, String> = HashMap(), useBytes: Boolean = false) : IBridgeHttpResponse {
+            if(body is V8ValueString)
+                return POSTInternal(url, body.value, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+            else if(body is String)
+                return POSTInternal(url, body, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+            else if(body is V8ValueTypedArray)
+                return POSTInternal(url, body.toBytes(), headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+            else if(body is ByteArray)
+                return POSTInternal(url, body, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+            else if(body is ArrayList<*>) //Avoid this case, used purely for testing
+                return POSTInternal(url, body.map { (it as Double).toInt().toByte() }.toByteArray(), headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING);
+            else
+                throw NotImplementedError("Body type " + body?.javaClass?.name?.toString() + " not implemented for POST");
+        }
+
+
+        //    = POSTInternal(url, body, headers, if(useBytes) ReturnType.BYTES else ReturnType.STRING)
+        fun POSTInternal(url: String, body: String, headers: MutableMap<String, String> = HashMap(), returnType: ReturnType = ReturnType.STRING) : IBridgeHttpResponse {
             applyDefaultHeaders(headers);
             return logExceptions {
                 catchHttp {
                     val client = _client;
-                    logRequest("POST", url, headers, body);
+                    //logRequest("POST", url, headers, body);
                     val resp = client.post(url, body, headers);
-                    val responseBody = resp.body?.string();
-                    logResponse("POST", url, resp.code, resp.headers, responseBody);
-                    return@catchHttp BridgeHttpResponse(resp.url, resp.code, responseBody, sanitizeResponseHeaders(resp.headers));
+                    //val responseBody = resp.body?.string();
+                    //logResponse("POST", url, resp.code, resp.headers, responseBody);
+
+
+                    return@catchHttp when(returnType) {
+                        ReturnType.STRING -> BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        ReturnType.BYTES -> BridgeHttpBytesResponse(resp.url, resp.code, resp.body?.bytes(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        else -> throw NotImplementedError("Return type " + returnType.toString() + " not implemented");
+                    }
+                }
+            };
+        }
+        fun POSTInternal(url: String, body: ByteArray, headers: MutableMap<String, String> = HashMap(), returnType: ReturnType = ReturnType.STRING) : IBridgeHttpResponse {
+            applyDefaultHeaders(headers);
+            return logExceptions {
+                catchHttp {
+                    val client = _client;
+                    //logRequest("POST", url, headers, body);
+                    val resp = client.post(url, body, headers);
+                    //val responseBody = resp.body?.string();
+                    //logResponse("POST", url, resp.code, resp.headers, responseBody);
+
+
+                    return@catchHttp when(returnType) {
+                        ReturnType.STRING -> BridgeHttpStringResponse(resp.url, resp.code, resp.body?.string(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        ReturnType.BYTES -> BridgeHttpBytesResponse(resp.url, resp.code, resp.body?.bytes(), sanitizeResponseHeaders(resp.headers,
+                            _client !is JSHttpClient || _client.isLoggedIn || _package._config !is SourcePluginConfig || !_package._config.allowAllHttpHeaderAccess));
+                        else -> throw NotImplementedError("Return type " + returnType.toString() + " not implemented");
+                    }
                 }
             };
         }
 
         @V8Function
         fun socket(url: String, headers: Map<String, String>? = null): SocketResult {
+            if(_package._cleanedUp)
+                throw IllegalStateException("Plugin shutdown");
             val socketHeaders = headers?.toMutableMap() ?: HashMap();
             applyDefaultHeaders(socketHeaders);
-            return SocketResult(this, _client, url, socketHeaders ?: HashMap());
+            val socket = SocketResult(_package, this, _client, url, socketHeaders);
+            Logger.w(TAG, "PackageHttp Socket opened");
+            synchronized(_package.aliveSockets) {
+                _package.aliveSockets.add(socket);
+            }
+            return socket;
         }
 
         private fun applyDefaultHeaders(headerMap: MutableMap<String, String>) {
@@ -291,20 +537,28 @@ class PackageHttp: V8Package {
             }
         }
 
-        private fun sanitizeResponseHeaders(headers: Map<String, List<String>>?): Map<String, List<String>> {
+        private fun sanitizeResponseHeaders(headers: Map<String, List<String>>?, onlyWhitelisted: Boolean = false): Map<String, List<String>> {
             val result = mutableMapOf<String, List<String>>()
-            headers?.forEach { (header, values) ->
-                val lowerCaseHeader = header.lowercase()
-                if (WHITELISTED_RESPONSE_HEADERS.contains(lowerCaseHeader)) {
-                    result[lowerCaseHeader] = values
+            if(onlyWhitelisted)
+                headers?.forEach { (header, values) ->
+                    val lowerCaseHeader = header.lowercase()
+                    if (WHITELISTED_RESPONSE_HEADERS.contains(lowerCaseHeader)) {
+                        result[lowerCaseHeader] = values
+                    }
+                }
+            else {
+                headers?.forEach { (header, values) ->
+                    val lowerCaseHeader = header.lowercase()
+                    if(lowerCaseHeader == "set-cookie" && !values.any { it.lowercase().contains("httponly") })
+                        result[lowerCaseHeader] = values;
+                    else
+                        result[lowerCaseHeader] = values;
                 }
             }
             return result
         }
 
         private fun logRequest(method: String, url: String, headers: Map<String, String> = HashMap(), body: String?) {
-            return;
-
             Logger.v(TAG) {
                 val stringBuilder = StringBuilder();
                 stringBuilder.appendLine("HTTP request (useAuth = )");
@@ -323,9 +577,7 @@ class PackageHttp: V8Package {
             };
         }
 
-        private fun logResponse(method: String, url: String, responseCode: Int? = null, responseHeaders: Map<String, List<String>> = HashMap(), responseBody: String? = null) {
-            return;
-
+        /*private fun logResponse(method: String, url: String, responseCode: Int? = null, responseHeaders: Map<String, List<String>> = HashMap(), responseBody: String? = null) {
             Logger.v(TAG) {
                 val stringBuilder = StringBuilder();
                 if (responseCode != null) {
@@ -350,7 +602,7 @@ class PackageHttp: V8Package {
 
                 return@v stringBuilder.toString();
             };
-        }
+        }*/
 
         fun <T> logExceptions(handle: ()->T): T {
             try {
@@ -362,13 +614,13 @@ class PackageHttp: V8Package {
             }
         }
 
-        private fun catchHttp(handle: ()->BridgeHttpResponse): BridgeHttpResponse {
+        private fun catchHttp(handle: ()->IBridgeHttpResponse): IBridgeHttpResponse {
             try{
                 return handle();
             }
             //Forward timeouts
             catch(ex: SocketTimeoutException) {
-                return BridgeHttpResponse("", 408, null);
+                return BridgeHttpStringResponse("", 408, null);
             }
         }
     }
@@ -380,13 +632,15 @@ class PackageHttp: V8Package {
 
         private var _listeners: V8ValueObject? = null;
 
+        private val _package: PackageHttp;
         private val _packageClient: PackageHttpClient;
         private val _client: ManagedHttpClient;
         private val _url: String;
         private val _headers: Map<String, String>;
 
-        constructor(pack: PackageHttpClient, client: ManagedHttpClient, url: String, headers: Map<String,String>) {
+        constructor(parent: PackageHttp, pack: PackageHttpClient, client: ManagedHttpClient, url: String, headers: Map<String,String>) {
             _packageClient = pack;
+            _package = parent;
             _client = client;
             _url = url;
             _headers = headers;
@@ -403,7 +657,7 @@ class PackageHttp: V8Package {
             val hasClosed = socketObj.has("closed");
             val hasFailure = socketObj.has("failure");
 
-            //socketObj.setWeak(); //We have to manage this lifecycle
+            socketObj.setWeak(); //We have to manage this lifecycle
             _listeners = socketObj;
 
             _socket = _packageClient.logExceptions {
@@ -412,31 +666,70 @@ class PackageHttp: V8Package {
                     override fun open() {
                         Logger.i(TAG, "Websocket opened: " + _url);
                         _isOpen = true;
-                        if(hasOpen)
-                            _listeners?.invokeVoid("open", arrayOf<Any>());
+                        if(hasOpen && _listeners?.isClosed != true) {
+                            try {
+                                _package._plugin.busy {
+                                    _listeners?.invokeV8Void("open", arrayOf<Any>());
+                                }
+                            }
+                            catch(ex: Throwable){
+                                Logger.e(TAG, "Socket for [${_packageClient.parentConfig.name}] open failed: " + ex.message, ex);
+                            }
+                        }
                     }
                     override fun message(msg: String) {
-                        if(hasMessage) {
+                        if(hasMessage && _listeners?.isClosed != true) {
                             try {
-                                _listeners?.invokeVoid("message", msg);
+                                _package._plugin.busy {
+                                    _listeners?.invokeV8Void("message", msg);
+                                }
                             }
                             catch(ex: Throwable) {}
                         }
                     }
                     override fun closing(code: Int, reason: String) {
-                        if(hasClosing)
-                            _listeners?.invokeVoid("closing", code, reason);
+                        if(hasClosing && _listeners?.isClosed != true)
+                        {
+                            try {
+                                _package._plugin.busy {
+                                    _listeners?.invokeV8Void("closing", code, reason);
+                                }
+                            }
+                            catch(ex: Throwable){
+                                Logger.e(TAG, "Socket for [${_packageClient.parentConfig.name}] closing failed: " + ex.message, ex);
+                            }
+                        }
                     }
                     override fun closed(code: Int, reason: String) {
                         _isOpen = false;
-                        if(hasClosed)
-                            _listeners?.invokeVoid("closed", code, reason);
+                        if(hasClosed && _listeners?.isClosed != true) {
+                            try {
+                                _package._plugin.busy {
+                                    _listeners?.invokeV8Void("closed", code, reason);
+                                }
+                            }
+                            catch(ex: Throwable){
+                                Logger.e(TAG, "Socket for [${_packageClient.parentConfig.name}] closed failed: " + ex.message, ex);
+                            }
+                        }
+                        Logger.w(TAG, "PackageHttp Socket removed");
+                        synchronized(_package.aliveSockets) {
+                            _package.aliveSockets.remove(this@SocketResult);
+                        }
                     }
                     override fun failure(exception: Throwable) {
                         _isOpen = false;
                         Logger.e(TAG, "Websocket failure: ${exception.message} (${_url})", exception);
-                        if(hasFailure)
-                            _listeners?.invokeVoid("failure", exception.message);
+                        if(hasFailure &&  _listeners?.isClosed != true) {
+                            try {
+                                _package._plugin.busy {
+                                    _listeners?.invokeV8Void("failure", exception.message);
+                                }
+                            }
+                            catch(ex: Throwable){
+                                Logger.e(TAG, "Socket for [${_packageClient.parentConfig.name}] closed failed: " + ex.message, ex);
+                            }
+                        }
                     }
                 });
             };
@@ -446,6 +739,16 @@ class PackageHttp: V8Package {
         fun send(msg: String) {
             _socket?.send(msg);
         }
+
+        @V8Function
+        fun close() {
+            _socket?.close(1000, "");
+        }
+        @V8Function
+        fun close(code: Int?, reason: String?) {
+            _socket?.close(code ?: 1000, reason ?: "");
+            _listeners?.close()
+        }
     }
 
     data class RequestDescriptor(
@@ -453,20 +756,25 @@ class PackageHttp: V8Package {
         val url: String,
         val headers: MutableMap<String, String>,
         val body: String? = null,
-        val contentType: String? = null
+        val contentType: String? = null,
+        val respType: ReturnType = ReturnType.STRING
     )
 
-    private fun catchHttp(handle: ()->BridgeHttpResponse): BridgeHttpResponse {
+    private fun catchHttp(handle: ()->BridgeHttpStringResponse): BridgeHttpStringResponse {
         try{
             return handle();
         }
         //Forward timeouts
         catch(ex: SocketTimeoutException) {
-            return BridgeHttpResponse("", 408, null);
+            return BridgeHttpStringResponse("", 408, null);
         }
     }
 
 
+    enum class ReturnType(val value: Int) {
+        STRING(0),
+        BYTES(1);
+    }
 
     companion object {
         private const val TAG = "PackageHttp";

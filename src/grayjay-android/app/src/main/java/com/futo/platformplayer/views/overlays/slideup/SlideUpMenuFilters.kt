@@ -30,6 +30,7 @@ class SlideUpMenuFilters {
 
     var commonCapabilities: ResultCapabilities? = null;
 
+
     constructor(lifecycleScope: CoroutineScope, container: ViewGroup, enabledClientsIds: List<String>, filterValues: HashMap<String, List<String>>) {
         _lifecycleScope = lifecycleScope;
         _container = container;

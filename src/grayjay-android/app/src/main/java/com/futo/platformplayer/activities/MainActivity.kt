@@ -1,56 +1,122 @@
 package com.futo.platformplayer.activities
 
+import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.StrictMode
+import android.os.StrictMode.VmPolicy
+import android.util.Log
 import android.util.TypedValue
 import android.view.View
+import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.motion.widget.MotionLayout
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import com.futo.platformplayer.*
-import com.futo.platformplayer.api.media.PlatformID
-import com.futo.platformplayer.api.media.models.channels.SerializedChannel
+import androidx.lifecycle.withStateAtLeast
+import androidx.media3.common.util.UnstableApi
+import com.futo.platformplayer.BuildConfig
+import com.futo.platformplayer.R
+import com.futo.platformplayer.Settings
+import com.futo.platformplayer.UIDialogs
+import com.futo.platformplayer.api.http.ManagedHttpClient
 import com.futo.platformplayer.casting.StateCasting
 import com.futo.platformplayer.constructs.Event1
-import com.futo.platformplayer.constructs.Event3
+import com.futo.platformplayer.dp
 import com.futo.platformplayer.fragment.mainactivity.bottombar.MenuBottomBarFragment
-import com.futo.platformplayer.fragment.mainactivity.main.*
+import com.futo.platformplayer.fragment.mainactivity.main.ArticleDetailFragment
+import com.futo.platformplayer.fragment.mainactivity.main.BrowserFragment
+import com.futo.platformplayer.fragment.mainactivity.main.BuyFragment
+import com.futo.platformplayer.fragment.mainactivity.main.ChannelFragment
+import com.futo.platformplayer.fragment.mainactivity.main.CommentsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.ContentSearchResultsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.CreatorSearchResultsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.CreatorsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.DownloadsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.HistoryFragment
+import com.futo.platformplayer.fragment.mainactivity.main.HomeFragment
+import com.futo.platformplayer.fragment.mainactivity.main.ImportPlaylistsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.ImportSubscriptionsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.MainFragment
+import com.futo.platformplayer.fragment.mainactivity.main.PlaylistFragment
+import com.futo.platformplayer.fragment.mainactivity.main.PlaylistSearchResultsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.PlaylistsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.PostDetailFragment
+import com.futo.platformplayer.fragment.mainactivity.main.RemotePlaylistFragment
+import com.futo.platformplayer.fragment.mainactivity.main.ShortsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SourceDetailFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SourcesFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SubscriptionGroupFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SubscriptionGroupListFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SubscriptionsFeedFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SuggestionsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.TutorialFragment
+import com.futo.platformplayer.fragment.mainactivity.main.VideoDetailFragment
+import com.futo.platformplayer.fragment.mainactivity.main.VideoDetailFragment.State
+import com.futo.platformplayer.fragment.mainactivity.main.WatchLaterFragment
+import com.futo.platformplayer.fragment.mainactivity.main.WebDetailFragment
 import com.futo.platformplayer.fragment.mainactivity.topbar.AddTopBarFragment
 import com.futo.platformplayer.fragment.mainactivity.topbar.GeneralTopBarFragment
 import com.futo.platformplayer.fragment.mainactivity.topbar.ImportTopBarFragment
 import com.futo.platformplayer.fragment.mainactivity.topbar.NavigationTopBarFragment
 import com.futo.platformplayer.fragment.mainactivity.topbar.SearchTopBarFragment
-import com.futo.platformplayer.listeners.OrientationManager
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.models.ImportCache
 import com.futo.platformplayer.models.UrlVideoWithTime
-import com.futo.platformplayer.states.*
+import com.futo.platformplayer.setNavigationBarColorAndIcons
+import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.states.StateBackup
+import com.futo.platformplayer.states.StateDeveloper
+import com.futo.platformplayer.states.StatePayment
+import com.futo.platformplayer.states.StatePlatform
+import com.futo.platformplayer.states.StatePlayer
+import com.futo.platformplayer.states.StatePlaylists
+import com.futo.platformplayer.states.StateSubscriptions
 import com.futo.platformplayer.stores.FragmentedStorage
+import com.futo.platformplayer.stores.StringStorage
 import com.futo.platformplayer.stores.SubscriptionStorage
 import com.futo.platformplayer.stores.v2.ManagedStore
+import com.futo.platformplayer.views.ToastView
+import com.futo.polycentric.core.ApiMethods
 import com.google.gson.JsonParser
-import kotlinx.coroutines.*
-import kotlinx.serialization.decodeFromString
+import com.google.zxing.integration.android.IntentIntegrator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.lang.reflect.InvocationTargetException
-import java.util.*
+import java.util.LinkedList
+import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
+
 
 class MainActivity : AppCompatActivity, IWithResultLauncher {
 
@@ -59,9 +125,10 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     private val HEIGHT_VIDEO_MINIMIZED_DP = 60f;
 
     //Containers
-    lateinit var rootView : MotionLayout;
+    lateinit var rootView: MotionLayout;
 
     private lateinit var _overlayContainer: FrameLayout;
+    private lateinit var _toastView: ToastView;
 
     //Segment Containers
     private lateinit var _fragContainerTopBar: FragmentContainerView;
@@ -69,6 +136,9 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     private lateinit var _fragContainerBotBar: FragmentContainerView;
     private lateinit var _fragContainerVideoDetail: FragmentContainerView;
     private lateinit var _fragContainerOverlay: FrameLayout;
+
+    //Views
+    private lateinit var _buttonIncognito: ImageView;
 
     //Frags TopBar
     lateinit var _fragTopBarGeneral: GeneralTopBarFragment;
@@ -83,23 +153,31 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     //Frags Main
     lateinit var _fragMainHome: HomeFragment;
     lateinit var _fragPostDetail: PostDetailFragment;
+    lateinit var _fragArticleDetail: ArticleDetailFragment;
+    lateinit var _fragWebDetail: WebDetailFragment;
     lateinit var _fragMainVideoSearchResults: ContentSearchResultsFragment;
     lateinit var _fragMainCreatorSearchResults: CreatorSearchResultsFragment;
     lateinit var _fragMainPlaylistSearchResults: PlaylistSearchResultsFragment;
     lateinit var _fragMainSuggestions: SuggestionsFragment;
     lateinit var _fragMainSubscriptions: CreatorsFragment;
+    lateinit var _fragMainComments: CommentsFragment;
     lateinit var _fragMainSubscriptionsFeed: SubscriptionsFeedFragment;
     lateinit var _fragMainChannel: ChannelFragment;
     lateinit var _fragMainSources: SourcesFragment;
+    lateinit var _fragMainTutorial: TutorialFragment;
     lateinit var _fragMainPlaylists: PlaylistsFragment;
     lateinit var _fragMainPlaylist: PlaylistFragment;
+    lateinit var _fragMainRemotePlaylist: RemotePlaylistFragment;
     lateinit var _fragWatchlist: WatchLaterFragment;
     lateinit var _fragHistory: HistoryFragment;
+    lateinit var _fragShorts: ShortsFragment;
     lateinit var _fragSourceDetail: SourceDetailFragment;
     lateinit var _fragDownloads: DownloadsFragment;
     lateinit var _fragImportSubscriptions: ImportSubscriptionsFragment;
     lateinit var _fragImportPlaylists: ImportPlaylistsFragment;
     lateinit var _fragBuy: BuyFragment;
+    lateinit var _fragSubGroup: SubscriptionGroupFragment;
+    lateinit var _fragSubGroupList: SubscriptionGroupListFragment;
 
     lateinit var _fragBrowser: BrowserFragment;
 
@@ -107,21 +185,54 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     lateinit var _fragVideoDetail: VideoDetailFragment;
 
     //State
-    private val _queue : Queue<Pair<MainFragment, Any?>> = LinkedList();
-    lateinit var fragCurrent : MainFragment private set;
+    private val _queue: LinkedList<Pair<MainFragment, Any?>> = LinkedList();
+    lateinit var fragCurrent: MainFragment private set;
     private var _parameterCurrent: Any? = null;
 
-    var fragBeforeOverlay : MainFragment? = null; private set;
+    var fragBeforeOverlay: MainFragment? = null; private set;
 
     val onNavigated = Event1<MainFragment>();
 
-    private lateinit var _orientationManager: OrientationManager;
-    var orientation: OrientationManager.Orientation = OrientationManager.Orientation.PORTRAIT
-        private set;
     private var _isVisible = true;
     private var _wasStopped = false;
+    private var _privateModeEnabled = false
+    private var _pictureInPictureEnabled = false
+    private var _isFullscreen = false
+
+    private val _urlQrCodeResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val scanResult = IntentIntegrator.parseActivityResult(result.resultCode, result.data)
+        scanResult?.let {
+            val content = it.contents
+            if (content == null) {
+                UIDialogs.toast(this, getString(R.string.failed_to_scan_qr_code))
+                return@let
+            }
+
+            try {
+                lifecycleScope.launch {
+                    handleUrlAll(content)
+                }
+            } catch (e: Throwable) {
+                Logger.i(TAG, "Failed to handle URL.", e)
+                UIDialogs.toast(this, "Failed to handle URL: ${e.message}")
+            }
+        }
+    }
+
+    val mainId = UUID.randomUUID().toString().substring(0, 5)
 
     constructor() : super() {
+        if (BuildConfig.DEBUG) {
+            StrictMode.setVmPolicy(
+                VmPolicy.Builder()
+                    .detectLeakedClosableObjects()
+                    .penaltyLog()
+                    .build()
+            )
+        }
+
+        ApiMethods.UserAgent = "Grayjay Android (${BuildConfig.VERSION_CODE})";
+
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             val writer = StringWriter();
 
@@ -129,15 +240,15 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             Logger.e("Application", "Uncaught", excp);
 
             //Resolve invocation chains
-            while(excp is InvocationTargetException || excp is java.lang.RuntimeException) {
+            while (excp is InvocationTargetException || excp is java.lang.RuntimeException) {
                 val before = excp;
 
-                if(excp is InvocationTargetException)
+                if (excp is InvocationTargetException)
                     excp = excp.targetException ?: excp.cause ?: excp;
-                else if(excp is java.lang.RuntimeException)
+                else if (excp is java.lang.RuntimeException)
                     excp = excp.cause ?: excp;
 
-                if(excp == before)
+                if (excp == before)
                     break;
             }
             writer.write((excp.message ?: "Empty error") + "\n\n");
@@ -154,16 +265,34 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         }
     }
 
+    override fun attachBaseContext(newBase: Context?) {
+        Logger.i(TAG, "MainActivity.attachBaseContext")
+        super.attachBaseContext(StateApp.instance.getLocaleContext(newBase))
+    }
+
+    @UnstableApi
     override fun onCreate(savedInstanceState: Bundle?) {
-        StateApp.instance.setGlobalContext(this, lifecycleScope);
+        Logger.w(TAG, "MainActivity Starting [$mainId]");
+        StateApp.instance.setGlobalContext(this, lifecycleScope, mainId);
         StateApp.instance.mainAppStarting(this);
 
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val uiMode = getSystemService(UiModeManager::class.java)
+            uiMode.setApplicationNightMode(UiModeManager.MODE_NIGHT_YES)
+        }
         setContentView(R.layout.activity_main);
         setNavigationBarColorAndIcons();
+        if (Settings.instance.playback.allowVideoToGoUnderCutout)
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
 
         runBlocking {
-            StatePlatform.instance.updateAvailableClients(this@MainActivity);
+            try {
+                StatePlatform.instance.updateAvailableClients(this@MainActivity);
+            } catch (e: Throwable) {
+                Logger.e(TAG, "Unhandled exception in updateAvailableClients", e)
+            }
         }
 
         //Preload common files to memory
@@ -177,7 +306,7 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         _fragContainerVideoDetail = findViewById(R.id.fragment_overlay);
         _fragContainerOverlay = findViewById(R.id.fragment_overlay_container);
         _overlayContainer = findViewById(R.id.overlay_container);
-        //_overlayContainer.visibility = View.GONE;
+        _toastView = findViewById(R.id.toast_view);
 
         //Initialize fragments
 
@@ -193,24 +322,32 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
 
         //Main
         _fragMainHome = HomeFragment.newInstance();
+        _fragMainTutorial = TutorialFragment.newInstance()
         _fragMainSuggestions = SuggestionsFragment.newInstance();
         _fragMainVideoSearchResults = ContentSearchResultsFragment.newInstance();
         _fragMainCreatorSearchResults = CreatorSearchResultsFragment.newInstance();
         _fragMainPlaylistSearchResults = PlaylistSearchResultsFragment.newInstance();
         _fragMainSubscriptions = CreatorsFragment.newInstance();
+        _fragMainComments = CommentsFragment.newInstance();
         _fragMainChannel = ChannelFragment.newInstance();
         _fragMainSubscriptionsFeed = SubscriptionsFeedFragment.newInstance();
         _fragMainSources = SourcesFragment.newInstance();
         _fragMainPlaylists = PlaylistsFragment.newInstance();
         _fragMainPlaylist = PlaylistFragment.newInstance();
+        _fragMainRemotePlaylist = RemotePlaylistFragment.newInstance();
         _fragPostDetail = PostDetailFragment.newInstance();
+        _fragArticleDetail = ArticleDetailFragment.newInstance();
+        _fragWebDetail = WebDetailFragment.newInstance();
         _fragWatchlist = WatchLaterFragment.newInstance();
         _fragHistory = HistoryFragment.newInstance();
+        _fragShorts = ShortsFragment.newInstance();
         _fragSourceDetail = SourceDetailFragment.newInstance();
         _fragDownloads = DownloadsFragment();
         _fragImportSubscriptions = ImportSubscriptionsFragment.newInstance();
         _fragImportPlaylists = ImportPlaylistsFragment.newInstance();
         _fragBuy = BuyFragment.newInstance();
+        _fragSubGroup = SubscriptionGroupFragment.newInstance();
+        _fragSubGroupList = SubscriptionGroupListFragment.newInstance();
 
         _fragBrowser = BrowserFragment.newInstance();
 
@@ -229,10 +366,12 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             updateSegmentPaddings();
         };
         _fragVideoDetail.onTransitioning.subscribe {
-            if(it || _fragVideoDetail.state != VideoDetailFragment.State.MINIMIZED)
-                _fragContainerOverlay.elevation = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 15f, resources.displayMetrics);
+            if (it || _fragVideoDetail.state != VideoDetailFragment.State.MINIMIZED)
+                _fragContainerOverlay.elevation =
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 15f, resources.displayMetrics);
             else
-                _fragContainerOverlay.elevation = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics);
+                _fragContainerOverlay.elevation =
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics);
         }
 
         _fragVideoDetail.onCloseEvent.subscribe {
@@ -241,7 +380,45 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             _fragMainSubscriptionsFeed.setPreviewsEnabled(true);
             _fragContainerVideoDetail.visibility = View.INVISIBLE;
             updateSegmentPaddings();
+            updatePrivateModeVisibility()
         };
+
+
+        _buttonIncognito = findViewById(R.id.incognito_button);
+        updatePrivateModeVisibility()
+        StateApp.instance.privateModeChanged.subscribe {
+            //Messing with visibility causes some issues with layout ordering?
+            _privateModeEnabled = it
+            updatePrivateModeVisibility()
+        }
+
+        _buttonIncognito.setOnClickListener {
+            if (!StateApp.instance.privateMode)
+                return@setOnClickListener;
+            UIDialogs.showDialog(
+                this, R.drawable.ic_disabled_visible_purple, "Disable Privacy Mode",
+                "Do you want to disable privacy mode? New videos will be tracked again.", null, 0,
+                UIDialogs.Action("Cancel", {
+                    StateApp.instance.setPrivacyMode(true);
+                }, UIDialogs.ActionStyle.NONE),
+                UIDialogs.Action("Disable", {
+                    StateApp.instance.setPrivacyMode(false);
+                }, UIDialogs.ActionStyle.DANGEROUS)
+            );
+        };
+        _fragVideoDetail.onFullscreenChanged.subscribe {
+            Logger.i(TAG, "onFullscreenChanged ${it}");
+            _isFullscreen = it
+            updatePrivateModeVisibility()
+        }
+
+        _fragVideoDetail.onMinimize.subscribe {
+            updatePrivateModeVisibility()
+        }
+
+        _fragVideoDetail.onMaximized.subscribe {
+            updatePrivateModeVisibility()
+        }
 
         StatePlayer.instance.also {
             it.onQueueChanged.subscribe { shouldSwapCurrentItem ->
@@ -249,7 +426,7 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
                     return@subscribe;
                 }
 
-                if(_fragVideoDetail.state == VideoDetailFragment.State.CLOSED) {
+                if (_fragVideoDetail.state == VideoDetailFragment.State.CLOSED) {
                     if (fragCurrent !is VideoDetailFragment) {
                         val toPlay = StatePlayer.instance.getCurrentQueueItem();
                         navigate(_fragVideoDetail, toPlay);
@@ -275,29 +452,36 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         //Set top bars
         _fragMainHome.topBar = _fragTopBarGeneral;
         _fragMainSubscriptions.topBar = _fragTopBarGeneral;
+        _fragMainComments.topBar = _fragTopBarGeneral;
         _fragMainSuggestions.topBar = _fragTopBarSearch;
         _fragMainVideoSearchResults.topBar = _fragTopBarSearch;
         _fragMainCreatorSearchResults.topBar = _fragTopBarSearch;
         _fragMainPlaylistSearchResults.topBar = _fragTopBarSearch;
         _fragMainChannel.topBar = _fragTopBarNavigation;
+        _fragMainTutorial.topBar = _fragTopBarNavigation;
         _fragMainSubscriptionsFeed.topBar = _fragTopBarGeneral;
         _fragMainSources.topBar = _fragTopBarAdd;
         _fragMainPlaylists.topBar = _fragTopBarGeneral;
         _fragMainPlaylist.topBar = _fragTopBarNavigation;
+        _fragMainRemotePlaylist.topBar = _fragTopBarNavigation;
         _fragPostDetail.topBar = _fragTopBarNavigation;
+        _fragArticleDetail.topBar = _fragTopBarNavigation;
+        _fragWebDetail.topBar = _fragTopBarNavigation;
         _fragWatchlist.topBar = _fragTopBarNavigation;
         _fragHistory.topBar = _fragTopBarNavigation;
         _fragSourceDetail.topBar = _fragTopBarNavigation;
         _fragDownloads.topBar = _fragTopBarGeneral;
         _fragImportSubscriptions.topBar = _fragTopBarImport;
         _fragImportPlaylists.topBar = _fragTopBarImport;
+        _fragSubGroupList.topBar = _fragTopBarAdd;
 
         _fragBrowser.topBar = _fragTopBarNavigation;
 
         fragCurrent = _fragMainHome;
 
         val defaultTab = Settings.instance.tabs.mapNotNull {
-            val buttonDefinition = MenuBottomBarFragment.buttonDefinitions.firstOrNull { bd -> it.id == bd.id };
+            val buttonDefinition =
+                MenuBottomBarFragment.buttonDefinitions.firstOrNull { bd -> it.id == bd.id };
             if (buttonDefinition == null) {
                 return@mapNotNull null;
             } else {
@@ -313,17 +497,6 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             .commitNow();
 
         defaultTab.action(_fragBotBarMenu);
-
-        _orientationManager = OrientationManager(this);
-        _orientationManager.onOrientationChanged.subscribe {
-            orientation = it;
-            Logger.i(TAG, "Orientation changed (Found ${it})");
-            fragCurrent.onOrientationChanged(it);
-            if(_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED)
-                _fragVideoDetail.onOrientationChanged(it);
-        };
-        _orientationManager.enable();
-
         StateSubscriptions.instance;
 
         fragCurrent.onShown(null, false);
@@ -366,8 +539,81 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         StateApp.instance.mainAppStartedWithExternalFiles(this);
 
         //startActivity(Intent(this, TestActivity::class.java));
-    }
 
+        // updates the requestedOrientation based on user settings
+        _fragVideoDetail.updateOrientation()
+
+        val sharedPreferences =
+            getSharedPreferences("GrayjayFirstBoot", Context.MODE_PRIVATE)
+        val isFirstBoot = sharedPreferences.getBoolean("IsFirstBoot", true)
+        if (isFirstBoot) {
+            UIDialogs.showConfirmationDialog(this, getString(R.string.do_you_want_to_see_the_tutorials_you_can_find_them_at_any_time_through_the_more_button), {
+                navigate(_fragMainTutorial)
+            })
+
+            sharedPreferences.edit().putBoolean("IsFirstBoot", false).apply()
+        }
+
+        val submissionStatus = FragmentedStorage.get<StringStorage>("subscriptionSubmissionStatus")
+
+        val numSubscriptions = StateSubscriptions.instance.getSubscriptionCount()
+
+        val subscriptionsThreshold = 20
+
+        if (
+            submissionStatus.value == ""
+            && StateApp.instance.getCurrentNetworkState() != StateApp.NetworkState.DISCONNECTED
+            && numSubscriptions >= subscriptionsThreshold
+        ) {
+
+            UIDialogs.showDialog(
+                this,
+                R.drawable.ic_internet,
+                getString(R.string.contribute_personal_subscriptions_list),
+                getString(R.string.contribute_personal_subscriptions_list_description),
+                null,
+                0,
+                UIDialogs.Action("Cancel", {
+                    submissionStatus.setAndSave("dismissed")
+                }, UIDialogs.ActionStyle.NONE),
+                UIDialogs.Action("Upload", {
+                    submissionStatus.setAndSave("submitted")
+
+                    GlobalScope.launch(Dispatchers.IO) {
+                        @Serializable
+                        data class CreatorInfo(val pluginId: String, val url: String)
+
+                        val subscriptions =
+                            StateSubscriptions.instance.getSubscriptions().map { original ->
+                                CreatorInfo(
+                                    pluginId = original.channel.id.pluginId ?: "",
+                                    url = original.channel.url
+                                )
+                            }
+
+                        val json = Json.encodeToString(subscriptions)
+
+                        val url = "https://data.grayjay.app/donate-subscription-list"
+                        val client = ManagedHttpClient();
+                        val headers = hashMapOf(
+                            "Content-Type" to "application/json"
+                        )
+                        try {
+                            val response = client.post(url, json, headers)
+                            // if it failed retry one time
+                            if (!response.isOk) {
+                                client.post(url, json, headers)
+                            }
+                        } catch (e: Exception) {
+                            Logger.i(TAG, "Failed to submit subscription list.", e)
+                        }
+                    }
+                }, UIDialogs.ActionStyle.PRIMARY)
+            )
+        }
+
+        //startActivity(Intent(this, TestActivity::class.java))
+    }
 
     /*
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -390,47 +636,63 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             UIDialogs.toast(this, "No external file permissions\nExporting and auto backups will not work");
     }*/
 
+    private var _qrCodeLoadingDialog: AlertDialog? = null
+
+    fun showUrlQrCodeScanner() {
+        try {
+            _qrCodeLoadingDialog = UIDialogs.showDialog(this, R.drawable.ic_loader_animated, true,
+                "Launching QR scanner",
+                "Make sure your camera is enabled", null, -2,
+                UIDialogs.Action("Close", {
+                    _qrCodeLoadingDialog?.dismiss()
+                    _qrCodeLoadingDialog = null
+                }));
+
+            val integrator = IntentIntegrator(this)
+            integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+            integrator.setPrompt(getString(R.string.scan_a_qr_code))
+            integrator.setOrientationLocked(true);
+            integrator.setCameraId(0)
+            integrator.setBeepEnabled(false)
+            integrator.setBarcodeImageEnabled(true)
+            integrator.captureActivity = QRCaptureActivity::class.java
+            _urlQrCodeResultLauncher.launch(integrator.createScanIntent())
+        } catch (e: Throwable) {
+            Logger.i(TAG, "Failed to handle show QR scanner.", e)
+            UIDialogs.toast(this, "Failed to show QR scanner: ${e.message}")
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun updatePrivateModeVisibility() {
+        if (_privateModeEnabled && (_fragVideoDetail.state == State.CLOSED || !_pictureInPictureEnabled && !_isFullscreen)) {
+            _buttonIncognito.elevation = 99f;
+            _buttonIncognito.alpha = 1f;
+            _buttonIncognito.translationY = if (_fragVideoDetail.state == State.MINIMIZED) -60.dp(resources).toFloat() else 0f
+        } else {
+            _buttonIncognito.elevation = -99f;
+            _buttonIncognito.alpha = 0f;
+        }
+    }
+
     override fun onResume() {
         super.onResume();
-        Logger.v(TAG, "onResume")
-
-        val curOrientation = _orientationManager.orientation;
-
-        if(_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED && _fragVideoDetail.lastOrientation != curOrientation) {
-            Logger.i(TAG, "Orientation mismatch (Found ${curOrientation})");
-            orientation = curOrientation;
-            fragCurrent.onOrientationChanged(curOrientation);
-            if(_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED)
-                _fragVideoDetail.onOrientationChanged(curOrientation);
-        }
-
+        Logger.w(TAG, "onResume [$mainId]")
         _isVisible = true;
-        val videoToOpen = StateSaved.instance.videoToOpen;
-
-        if (_wasStopped) {
-            _wasStopped = false;
-
-            if (videoToOpen != null && _fragVideoDetail.state == VideoDetailFragment.State.CLOSED) {
-                Logger.i(TAG, "onResume videoToOpen=$videoToOpen");
-                if (StatePlatform.instance.hasEnabledVideoClient(videoToOpen.url)) {
-                    navigate(_fragVideoDetail, UrlVideoWithTime(videoToOpen.url, videoToOpen.timeSeconds, false));
-                    _fragVideoDetail.maximizeVideoDetail(true);
-                }
-
-                StateSaved.instance.setVideoToOpenNonBlocking(null);
-            }
-        }
     }
 
     override fun onPause() {
         super.onPause();
-        Logger.v(TAG, "onPause")
+        Logger.w(TAG, "onPause [$mainId]")
         _isVisible = false;
+
+        _qrCodeLoadingDialog?.dismiss()
+        _qrCodeLoadingDialog = null
     }
 
     override fun onStop() {
         super.onStop()
-        Logger.v(TAG, "_wasStopped = true");
+        Logger.w(TAG, "onStop [$mainId]");
         _wasStopped = true;
     }
 
@@ -440,185 +702,274 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if(intent == null)
+        if (intent == null)
             return;
         Logger.i(TAG, "handleIntent started by " + intent.action);
 
 
         var targetData: String? = null;
 
-        when(intent.action) {
+        when (intent.action) {
             Intent.ACTION_SEND -> {
-                targetData = intent.getStringExtra(Intent.EXTRA_STREAM) ?: intent.getStringExtra(Intent.EXTRA_TEXT);
+                targetData = intent.getStringExtra(Intent.EXTRA_STREAM)
+                    ?: intent.getStringExtra(Intent.EXTRA_TEXT);
                 Logger.i(TAG, "Share Received: " + targetData);
             }
+
             Intent.ACTION_VIEW -> {
                 targetData = intent.dataString
 
-                if(!targetData.isNullOrEmpty()) {
+                if (!targetData.isNullOrEmpty()) {
                     Logger.i(TAG, "View Received: " + targetData);
                 }
             }
+
             "VIDEO" -> {
                 val url = intent.getStringExtra("VIDEO");
-                navigate(_fragVideoDetail, url);
+                navigateWhenReady(_fragVideoDetail, url);
             }
+
+            "IMPORT_OPTIONS" -> {
+                UIDialogs.showImportOptionsDialog(this);
+            }
+
+            "ACTION" -> {
+                val action = intent.getStringExtra("ACTION");
+                StateDeveloper.instance.testState = "TestPlayback";
+                StateDeveloper.instance.testPlayback();
+            }
+
             "TAB" -> {
-                when(intent.getStringExtra("TAB")){
+                when (intent.getStringExtra("TAB")) {
                     "Sources" -> {
                         runBlocking {
                             StatePlatform.instance.updateAvailableClients(this@MainActivity, true) //Ideally this is not needed..
-                            navigate(_fragMainSources);
+                            navigateWhenReady(_fragMainSources);
                         }
                     };
+                    "BROWSE_PLUGINS" -> {
+                        navigateWhenReady(_fragBrowser, BrowserFragment.NavigateOptions("https://plugins.grayjay.app/phone.html", mapOf(
+                            Pair("grayjay") { req ->
+                                StateApp.instance.contextOrNull?.let {
+                                    if (it is MainActivity) {
+                                        runBlocking {
+                                            it.handleUrlAll(req.url.toString());
+                                        }
+                                    }
+                                };
+                            }
+                        )));
+                    }
                 }
             }
         }
 
         try {
             if (targetData != null) {
-                when(intent.scheme) {
-                    "grayjay" -> {
-                        if(targetData.startsWith("grayjay://license/")) {
-                            if(StatePayment.instance.setPaymentLicenseUrl(targetData))
-                            {
-                                UIDialogs.showDialogOk(this, R.drawable.ic_check, getString(R.string.your_license_key_has_been_set_an_app_restart_might_be_required));
-
-                                if(fragCurrent is BuyFragment)
-                                    closeSegment(fragCurrent);
-                            }
-                            else
-                                UIDialogs.toast(getString(R.string.invalid_license_format));
-
-                        }
-                        else if(targetData.startsWith("grayjay://plugin/")) {
-                            val intent = Intent(this, AddSourceActivity::class.java).apply {
-                                data = Uri.parse(targetData.substring("grayjay://plugin/".length));
-                            };
-                            startActivity(intent);
-                        }
-                        else if(targetData.startsWith("grayjay://video/")) {
-                            val videoUrl = targetData.substring("grayjay://video/".length);
-                            navigate(_fragVideoDetail, videoUrl);
-                        }
-                        else if(targetData.startsWith("grayjay://channel/")) {
-                            val channelUrl = targetData.substring("grayjay://channel/".length);
-                            navigate(_fragMainChannel, channelUrl);
-                        }
-                    }
-                    "content" -> {
-                        if(!handleContent(targetData, intent.type)) {
-                            UIDialogs.showSingleButtonDialog(
-                                this,
-                                R.drawable.ic_play,
-                                getString(R.string.unknown_content_format) + " [${targetData}]",
-                                "Ok",
-                                { });
-                        }
-                    }
-                    "file" -> {
-                        if(!handleFile(targetData)) {
-                            UIDialogs.showSingleButtonDialog(
-                                this,
-                                R.drawable.ic_play,
-                                getString(R.string.unknown_file_format) + " [${targetData}]",
-                                "Ok",
-                                { });
-                        }
-                    }
-                    "polycentric" -> {
-                        if(!handlePolycentric(targetData)) {
-                            UIDialogs.showSingleButtonDialog(
-                                this,
-                                R.drawable.ic_play,
-                                getString(R.string.unknown_polycentric_format) + " [${targetData}]",
-                                "Ok",
-                                { });
-                        }
-                    }
-                    else -> {
-                        if (!handleUrl(targetData)) {
-                            UIDialogs.showSingleButtonDialog(
-                                this,
-                                R.drawable.ic_play,
-                                getString(R.string.unknown_url_format) + " [${targetData}]",
-                                "Ok",
-                                { });
-                        }
+                lifecycleScope.launch(Dispatchers.Main) {
+                    try {
+                        handleUrlAll(targetData)
+                    } catch (e: Throwable) {
+                        Logger.e(TAG, "Unhandled exception in handleUrlAll", e)
                     }
                 }
             }
-        }
-        catch(ex: Throwable) {
+        } catch (ex: Throwable) {
             UIDialogs.showGeneralErrorDialog(this, getString(R.string.failed_to_handle_file), ex);
         }
     }
 
-    fun handleUrl(url: String): Boolean {
+    suspend fun handleUrlAll(url: String) {
+        val uri = Uri.parse(url)
+        when (uri.scheme) {
+            "grayjay" -> {
+                if (url.startsWith("grayjay://license/")) {
+                    if (StatePayment.instance.setPaymentLicenseUrl(url)) {
+                        UIDialogs.showDialogOk(this, R.drawable.ic_check, getString(R.string.your_license_key_has_been_set_an_app_restart_might_be_required));
+
+                        if (fragCurrent is BuyFragment)
+                            closeSegment(fragCurrent);
+                    } else
+                        UIDialogs.toast(getString(R.string.invalid_license_format));
+
+                } else if (url.startsWith("grayjay://plugin/")) {
+                    val intent = Intent(this, AddSourceActivity::class.java).apply {
+                        data = Uri.parse(url.substring("grayjay://plugin/".length));
+                    };
+                    startActivity(intent);
+                } else if (url.startsWith("grayjay://video/")) {
+                    val videoUrl = url.substring("grayjay://video/".length);
+                    navigateWhenReady(_fragVideoDetail, videoUrl);
+                } else if (url.startsWith("grayjay://channel/")) {
+                    val channelUrl = url.substring("grayjay://channel/".length);
+                    navigateWhenReady(_fragMainChannel, channelUrl);
+                }
+            }
+
+            "content" -> {
+                if (!handleContent(url, intent.type)) {
+                    UIDialogs.showSingleButtonDialog(
+                        this,
+                        R.drawable.ic_play,
+                        getString(R.string.unknown_content_format) + " [${url}]\n[${intent.type}]",
+                        "Ok",
+                        { });
+                }
+            }
+
+            "file" -> {
+                if (!handleFile(url)) {
+                    UIDialogs.showSingleButtonDialog(
+                        this,
+                        R.drawable.ic_play,
+                        getString(R.string.unknown_file_format) + " [${url}]",
+                        "Ok",
+                        { });
+                }
+            }
+
+            "polycentric" -> {
+                if (!handlePolycentric(url)) {
+                    UIDialogs.showSingleButtonDialog(
+                        this,
+                        R.drawable.ic_play,
+                        getString(R.string.unknown_polycentric_format) + " [${url}]",
+                        "Ok",
+                        { });
+                }
+            }
+
+            "fcast" -> {
+                if (!handleFCast(url)) {
+                    UIDialogs.showSingleButtonDialog(
+                        this,
+                        R.drawable.ic_cast,
+                        "Unknown FCast format [${url}]",
+                        "Ok",
+                        { });
+                }
+            }
+
+            else -> {
+                if (!handleUrl(url)) {
+                    UIDialogs.showSingleButtonDialog(
+                        this,
+                        R.drawable.ic_play,
+                        getString(R.string.unknown_url_format) + " [${url}]",
+                        "Ok",
+                        { });
+                }
+            }
+        }
+    }
+
+    suspend fun handleUrl(url: String, position: Int = 0): Boolean {
         Logger.i(TAG, "handleUrl(url=$url)")
 
-        if (StatePlatform.instance.hasEnabledVideoClient(url)) {
-            navigate(_fragVideoDetail, url);
-            _fragVideoDetail.maximizeVideoDetail(true);
-            return true;
-        } else if(StatePlatform.instance.hasEnabledChannelClient(url)) {
-            navigate(_fragMainChannel, url);
+        return withContext(Dispatchers.IO) {
+            Logger.i(TAG, "handleUrl(url=$url) on IO");
+            if (StatePlatform.instance.hasEnabledContentClient(url)) {
+                Logger.i(TAG, "handleUrl(url=$url) found video client");
+                withContext(Dispatchers.Main) {
+                    if (position > 0)
+                        navigateWhenReady(_fragVideoDetail, UrlVideoWithTime(url, position.toLong(), true));
+                    else
+                        navigateWhenReady(_fragVideoDetail, url);
 
-            lifecycleScope.launch {
-                delay(100);
-                _fragVideoDetail.minimizeVideoDetail();
-            };
-            return true;
+                    _fragVideoDetail.maximizeVideoDetail(true);
+                }
+                return@withContext true;
+            } else if (StatePlatform.instance.hasEnabledChannelClient(url)) {
+                Logger.i(TAG, "handleUrl(url=$url) found channel client");
+                withContext(Dispatchers.Main) {
+                    navigateWhenReady(_fragMainChannel, url);
+                    delay(100);
+                    _fragVideoDetail.minimizeVideoDetail();
+                };
+                return@withContext true;
+            } else if (StatePlatform.instance.hasEnabledPlaylistClient(url)) {
+                Logger.i(TAG, "handleUrl(url=$url) found playlist client");
+                withContext(Dispatchers.Main) {
+                    navigateWhenReady(_fragMainRemotePlaylist, url);
+                    delay(100);
+                    _fragVideoDetail.minimizeVideoDetail();
+                };
+                return@withContext true;
+            }
+            return@withContext false;
         }
-        return false;
     }
+
     fun handleContent(file: String, mime: String? = null): Boolean {
         Logger.i(TAG, "handleContent(url=$file)");
 
         val data = readSharedContent(file);
-        if(file.lowercase().endsWith(".json") || mime == "application/json") {
+        if (file.lowercase().endsWith(".json") || mime == "application/json") {
             var recon = String(data);
-            if(!recon.trim().startsWith("["))
-                return handleUnknownJson(file, recon);
+            if (!recon.trim().startsWith("["))
+                return handleUnknownJson(recon);
 
-            val reconLines = Json.decodeFromString<List<String>>(recon);
+            var reconLines = Json.decodeFromString<List<String>>(recon);
+            val cacheStr =
+                reconLines.find { it.startsWith("__CACHE:") }?.substring("__CACHE:".length);
+            reconLines = reconLines.filter { !it.startsWith("__CACHE:") }; //TODO: constant prefix
+            var cache: ImportCache? = null;
+            try {
+                if (cacheStr != null)
+                    cache = Json.decodeFromString(cacheStr);
+            } catch (ex: Throwable) {
+                Logger.e(TAG, "Failed to deserialize cache");
+            }
+
+
             recon = reconLines.joinToString("\n");
             Logger.i(TAG, "Opened shared playlist reconstruction\n${recon}");
-            handleReconstruction(recon);
+            handleReconstruction(recon, cache);
             return true;
-        }
-        else if(file.lowercase().endsWith(".zip") || mime == "application/zip") {
+        } else if (file.lowercase().endsWith(".zip") || mime == "application/zip") {
             StateBackup.importZipBytes(this, lifecycleScope, data);
             return true;
-        }
-        else if(file.lowercase().endsWith(".txt") || mime == "text/plain") {
+        } else if (file.lowercase().endsWith(".txt") || mime == "text/plain") {
             return handleUnknownText(String(data));
         }
         return false;
     }
+
     fun handleFile(file: String): Boolean {
         Logger.i(TAG, "handleFile(url=$file)");
-        if(file.lowercase().endsWith(".json")) {
-            val recon = String(readSharedFile(file));
-            if(!recon.startsWith("["))
-                return handleUnknownJson(file, recon);
+        if (file.lowercase().endsWith(".json")) {
+            var recon = String(readSharedFile(file));
+            if (!recon.startsWith("["))
+                return handleUnknownJson(recon);
+
+            var reconLines = Json.decodeFromString<List<String>>(recon);
+            val cacheStr =
+                reconLines.find { it.startsWith("__CACHE:") }?.substring("__CACHE:".length);
+            reconLines = reconLines.filter { !it.startsWith("__CACHE:") }; //TODO: constant prefix
+            var cache: ImportCache? = null;
+            try {
+                if (cacheStr != null)
+                    cache = Json.decodeFromString(cacheStr);
+            } catch (ex: Throwable) {
+                Logger.e(TAG, "Failed to deserialize cache");
+            }
+            recon = reconLines.joinToString("\n");
 
             Logger.i(TAG, "Opened shared playlist reconstruction\n${recon}");
-            handleReconstruction(recon);
+            handleReconstruction(recon, cache);
             return true;
-        }
-        else if(file.lowercase().endsWith(".zip")) {
+        } else if (file.lowercase().endsWith(".zip")) {
             StateBackup.importZipBytes(this, lifecycleScope, readSharedFile(file));
             return true;
-        }
-        else if(file.lowercase().endsWith(".txt")) {
+        } else if (file.lowercase().endsWith(".txt")) {
             return handleUnknownText(String(readSharedFile(file)));
         }
         return false;
     }
-    fun handleReconstruction(recon: String) {
+
+    fun handleReconstruction(recon: String, cache: ImportCache? = null) {
         val type = ManagedStore.getReconstructionIdentifier(recon);
-        val store: ManagedStore<*> = when(type) {
+        val store: ManagedStore<*> = when (type) {
             "Playlist" -> StatePlaylists.instance.playlistStore
             else -> {
                 UIDialogs.toast(getString(R.string.unknown_reconstruction_type) + " ${type}", false);
@@ -626,14 +977,16 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             };
         };
 
-        val name = when(type) {
-            "Playlist" -> recon.split("\n").filter { !it.startsWith(ManagedStore.RECONSTRUCTION_HEADER_OPERATOR) }.firstOrNull() ?: type;
+        val name = when (type) {
+            "Playlist" -> recon.split("\n")
+                .filter { !it.startsWith(ManagedStore.RECONSTRUCTION_HEADER_OPERATOR) }
+                .firstOrNull() ?: type;
             else -> type
         }
 
 
-        if(!type.isNullOrEmpty()) {
-            UIDialogs.showImportDialog(this, store, name, listOf(recon)) {
+        if (!type.isNullOrEmpty()) {
+            UIDialogs.showImportDialog(this, store, name, listOf(recon), cache) {
 
             }
         }
@@ -641,19 +994,19 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
 
     fun handleUnknownText(text: String): Boolean {
         try {
-            if(text.startsWith("@/Subscription") || text.startsWith("Subscriptions")) {
+            if (text.startsWith("@/Subscription") || text.startsWith("Subscriptions")) {
                 val lines = text.split("\n").map { it.trim() }.drop(1).filter { it.isNotEmpty() };
                 navigate(_fragImportSubscriptions, lines);
                 return true;
             }
-        }
-        catch(ex: Throwable) {
+        } catch (ex: Throwable) {
             Logger.e(TAG, ex.message, ex);
             UIDialogs.showGeneralErrorDialog(this, getString(R.string.failed_to_parse_text_file), ex);
         }
         return false;
     }
-    fun handleUnknownJson(name: String?, json: String): Boolean {
+
+    fun handleUnknownJson(json: String): Boolean {
 
         val context = this;
 
@@ -663,20 +1016,8 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             if (!newPipeSubsParsed.has("subscriptions") || !newPipeSubsParsed["subscriptions"].isJsonArray)
                 return false;//throw IllegalArgumentException("Invalid NewPipe json structure found");
 
-            val jsonSubs = newPipeSubsParsed["subscriptions"]
-            val jsonSubsArray = jsonSubs.asJsonArray;
-            val jsonSubsArrayItt = jsonSubsArray.iterator();
-            val subs = mutableListOf<String>()
-            while(jsonSubsArrayItt.hasNext()) {
-                val jsonSubObj = jsonSubsArrayItt.next().asJsonObject;
-
-                if(jsonSubObj.has("url"))
-                    subs.add(jsonSubObj["url"].asString);
-            }
-
-            navigate(_fragImportSubscriptions, subs);
-        }
-        catch(ex: Exception) {
+            StateBackup.importNewPipeSubs(this, newPipeSubsParsed);
+        } catch (ex: Exception) {
             Logger.e(TAG, ex.message, ex);
             UIDialogs.showGeneralErrorDialog(context, getString(R.string.failed_to_parse_newpipe_subscriptions), ex);
         }
@@ -700,6 +1041,20 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         startActivity(Intent(this, PolycentricImportProfileActivity::class.java).apply { putExtra("url", url) })
         return true;
     }
+
+    fun handleFCast(url: String): Boolean {
+        Logger.i(TAG, "handleFCast");
+
+        try {
+            StateCasting.instance.handleUrl(this, url)
+            return true;
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to parse FCast URL '${url}'.", e)
+        }
+
+        return false
+    }
+
     private fun readSharedContent(contentPath: String): ByteArray {
         return contentResolver.openInputStream(Uri.parse(contentPath))?.use {
             return it.readBytes();
@@ -708,7 +1063,7 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
 
     private fun readSharedFile(filePath: String): ByteArray {
         val dataFile = File(filePath);
-        if(!dataFile.exists())
+        if (!dataFile.exists())
             throw IllegalArgumentException("Opened file does not exist or not permitted");
         val data = dataFile.readBytes();
         return data;
@@ -717,15 +1072,13 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     override fun onBackPressed() {
         Logger.i(TAG, "onBackPressed")
 
-        if(_fragBotBarMenu.onBackPressed())
+        if (_fragBotBarMenu.onBackPressed())
             return;
 
-        if(_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED &&
-            _fragVideoDetail.onBackPressed())
+        if (_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED && _fragVideoDetail.onBackPressed())
             return;
 
-
-        if(!fragCurrent.onBackPressed())
+        if (!fragCurrent.onBackPressed())
             closeSegment();
     }
 
@@ -733,25 +1086,13 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
         super.onUserLeaveHint();
         Logger.i(TAG, "onUserLeaveHint")
 
-        if(_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED || _fragVideoDetail.state == VideoDetailFragment.State.MINIMIZED)
+        if (_fragVideoDetail.state == VideoDetailFragment.State.MAXIMIZED || _fragVideoDetail.state == VideoDetailFragment.State.MINIMIZED)
             _fragVideoDetail.onUserLeaveHint();
     }
 
     override fun onRestart() {
         super.onRestart();
         Logger.i(TAG, "onRestart");
-
-        //Force Portrait on restart
-        Logger.i(TAG, "Restarted with state ${_fragVideoDetail.state}");
-        if(_fragVideoDetail.state != VideoDetailFragment.State.MAXIMIZED) {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
-            WindowCompat.setDecorFitsSystemWindows(window, true)
-            WindowInsetsControllerCompat(window, rootView).let { controller ->
-                controller.show(WindowInsetsCompat.Type.statusBars());
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            }
-            _fragVideoDetail.onOrientationChanged(OrientationManager.Orientation.PORTRAIT);
-        }
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -759,37 +1100,49 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
 
         val isStop: Boolean = lifecycle.currentState == Lifecycle.State.CREATED;
         Logger.v(TAG, "onPictureInPictureModeChanged isInPictureInPictureMode=$isInPictureInPictureMode isStop=$isStop")
-        _fragVideoDetail?.onPictureInPictureModeChanged(isInPictureInPictureMode, isStop, newConfig);
+        _fragVideoDetail.onPictureInPictureModeChanged(isInPictureInPictureMode, isStop, newConfig);
         Logger.v(TAG, "onPictureInPictureModeChanged Ready");
+
+        _pictureInPictureEnabled = isInPictureInPictureMode
+        updatePrivateModeVisibility()
     }
 
     override fun onDestroy() {
         super.onDestroy();
-        Logger.v(TAG, "onDestroy")
-
-        _orientationManager.disable();
-
-        StateApp.instance.mainAppDestroyed(this);
-        StateSaved.instance.setVideoToOpenBlocking(null);
+        Logger.w(TAG, "onDestroy [$mainId]")
+        StateApp.instance.mainAppDestroyed(this, mainId);
     }
 
     inline fun <reified T> isFragmentActive(): Boolean {
         return fragCurrent is T;
     }
 
+    fun navigateWhenReady(segment: MainFragment, parameter: Any? = null, withHistory: Boolean = true, isBack: Boolean = false) {
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            navigate(segment, parameter, withHistory, isBack)
+        } else {
+            lifecycleScope.launch {
+                lifecycle.withStateAtLeast(Lifecycle.State.RESUMED) {
+                    navigate(segment, parameter, withHistory, isBack)
+                }
+            }
+        }
+    }
+
     /**
      * Navigate takes a MainFragment, and makes them the current main visible view
      * A parameter can be provided which becomes available in the onShow of said fragment
      */
+    @SuppressLint("CommitTransaction")
     fun navigate(segment: MainFragment, parameter: Any? = null, withHistory: Boolean = true, isBack: Boolean = false) {
         Logger.i(TAG, "Navigate to $segment (parameter=$parameter, withHistory=$withHistory, isBack=$isBack)")
 
-        if(segment != fragCurrent) {
-            
-            if(segment is VideoDetailFragment) {
-                if(_fragContainerVideoDetail.visibility != View.VISIBLE)
+        if (segment != fragCurrent) {
+
+            if (segment is VideoDetailFragment) {
+                if (_fragContainerVideoDetail.visibility != View.VISIBLE)
                     _fragContainerVideoDetail.visibility = View.VISIBLE;
-                when(segment.state) {
+                when (segment.state) {
                     VideoDetailFragment.State.MINIMIZED -> segment.maximizeVideoDetail()
                     VideoDetailFragment.State.CLOSED -> segment.maximizeVideoDetail()
                     else -> {}
@@ -797,11 +1150,10 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
                 segment.onShown(parameter, isBack);
                 return;
             }
-            
-            
+
             fragCurrent.onHide();
 
-            if(segment.isMainView) {
+            if (segment.isMainView) {
                 var transaction = supportFragmentManager.beginTransaction();
                 if (segment.topBar != null) {
                     if (segment.topBar != fragCurrent.topBar) {
@@ -810,43 +1162,33 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
                             .replace(R.id.fragment_top_bar, segment.topBar as Fragment);
                         fragCurrent.topBar?.onHide();
                     }
-                }
-                else if(fragCurrent.topBar != null)
+                } else if (fragCurrent.topBar != null)
                     transaction.hide(fragCurrent.topBar as Fragment);
 
                 transaction = transaction.replace(R.id.fragment_main, segment);
 
-                val extraBottomDP = if(_fragVideoDetail.state == VideoDetailFragment.State.MINIMIZED) HEIGHT_VIDEO_MINIMIZED_DP else 0f
                 if (segment.hasBottomBar) {
                     if (!fragCurrent.hasBottomBar)
                         transaction = transaction.show(_fragBotBarMenu);
-                }
-                else {
-                    if(fragCurrent.hasBottomBar)
+                } else {
+                    if (fragCurrent.hasBottomBar)
                         transaction = transaction.hide(_fragBotBarMenu);
                 }
                 transaction.commitNow();
-            }
-            else {
-                //Special cases
-                if(segment is VideoDetailFragment) {
-                    _fragContainerVideoDetail.visibility = View.VISIBLE;
-                    _fragVideoDetail.maximizeVideoDetail();
-                }
+            } else {
 
-                if(!segment.hasBottomBar) {
+                if (!segment.hasBottomBar) {
                     supportFragmentManager.beginTransaction()
                         .hide(_fragBotBarMenu)
                         .commitNow();
                 }
             }
 
-            if(fragCurrent.isHistory && withHistory && _queue.lastOrNull() != fragCurrent)
+            if (fragCurrent.isHistory && withHistory && _queue.lastOrNull() != fragCurrent)
                 _queue.add(Pair(fragCurrent, _parameterCurrent));
 
-            if(segment.isOverlay && !fragCurrent.isOverlay && withHistory)// && fragCurrent.isHistory)
+            if (segment.isOverlay && !fragCurrent.isOverlay && withHistory)// && fragCurrent.isHistory)
                 fragBeforeOverlay = fragCurrent;
-
 
             fragCurrent = segment;
             _parameterCurrent = parameter;
@@ -862,31 +1204,37 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
      * If called with a non-null fragment, it will only close if the current fragment is the provided one
      */
     fun closeSegment(fragment: MainFragment? = null) {
-        if(fragment is VideoDetailFragment) {
+        if (fragment is VideoDetailFragment) {
             fragment.onHide();
             return;
         }
 
-        if((fragment?.isOverlay ?: false) && fragBeforeOverlay != null) {
+        if ((fragment?.isOverlay ?: false) && fragBeforeOverlay != null) {
             navigate(fragBeforeOverlay!!, null, false, true);
-
-        }
-        else {
+        } else {
             val last = _queue.lastOrNull();
             if (last != null) {
                 _queue.remove(last);
                 navigate(last.first, last.second, false, true);
-            } else
-                finish();
+            } else {
+                if (_fragVideoDetail.state == VideoDetailFragment.State.CLOSED) {
+                    finish();
+                } else {
+                    UIDialogs.showConfirmationDialog(this, "There is a video playing, are you sure you want to exit the app?", {
+                        finish();
+                    })
+                }
+            }
         }
     }
 
     /**
      * Provides the fragment instance for the provided fragment class
      */
-    inline fun <reified T : Fragment> getFragment() : T {
-        return when(T::class) {
+    inline fun <reified T : Fragment> getFragment(): T {
+        return when (T::class) {
             HomeFragment::class -> _fragMainHome as T;
+            TutorialFragment::class -> _fragMainTutorial as T;
             ContentSearchResultsFragment::class -> _fragMainVideoSearchResults as T;
             CreatorSearchResultsFragment::class -> _fragMainCreatorSearchResults as T;
             SuggestionsFragment::class -> _fragMainSuggestions as T;
@@ -895,21 +1243,28 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
             GeneralTopBarFragment::class -> _fragTopBarGeneral as T;
             SearchTopBarFragment::class -> _fragTopBarSearch as T;
             CreatorsFragment::class -> _fragMainSubscriptions as T;
+            CommentsFragment::class -> _fragMainComments as T;
             SubscriptionsFeedFragment::class -> _fragMainSubscriptionsFeed as T;
             PlaylistSearchResultsFragment::class -> _fragMainPlaylistSearchResults as T;
             ChannelFragment::class -> _fragMainChannel as T;
             SourcesFragment::class -> _fragMainSources as T;
             PlaylistsFragment::class -> _fragMainPlaylists as T;
             PlaylistFragment::class -> _fragMainPlaylist as T;
+            RemotePlaylistFragment::class -> _fragMainRemotePlaylist as T;
             PostDetailFragment::class -> _fragPostDetail as T;
+            ArticleDetailFragment::class -> _fragArticleDetail as T;
+            WebDetailFragment::class -> _fragWebDetail as T;
             WatchLaterFragment::class -> _fragWatchlist as T;
             HistoryFragment::class -> _fragHistory as T;
+            ShortsFragment::class -> _fragShorts as T;
             SourceDetailFragment::class -> _fragSourceDetail as T;
             DownloadsFragment::class -> _fragDownloads as T;
             ImportSubscriptionsFragment::class -> _fragImportSubscriptions as T;
             ImportPlaylistsFragment::class -> _fragImportPlaylists as T;
             BrowserFragment::class -> _fragBrowser as T;
             BuyFragment::class -> _fragBuy as T;
+            SubscriptionGroupFragment::class -> _fragSubGroup as T;
+            SubscriptionGroupListFragment::class -> _fragSubGroupList as T;
             else -> throw IllegalArgumentException("Fragment type ${T::class.java.name} is not available in MainActivity");
         }
     }
@@ -917,32 +1272,108 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
 
     private fun updateSegmentPaddings() {
         var paddingBottom = 0f;
-        if(fragCurrent.hasBottomBar)
+        if (fragCurrent.hasBottomBar)
             paddingBottom += HEIGHT_MENU_DP;
 
-        _fragContainerOverlay.setPadding(0,0,0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, paddingBottom - HEIGHT_MENU_DP, resources.displayMetrics).toInt());
+        _fragContainerOverlay.setPadding(
+            0, 0, 0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, paddingBottom - HEIGHT_MENU_DP, resources.displayMetrics)
+                .toInt()
+        );
 
-        if(_fragVideoDetail.state == VideoDetailFragment.State.MINIMIZED)
+        if (_fragVideoDetail.state == VideoDetailFragment.State.MINIMIZED)
             paddingBottom += HEIGHT_VIDEO_MINIMIZED_DP;
 
-        _fragContainerMain.setPadding(0,0,0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, paddingBottom, resources.displayMetrics).toInt());
+        _fragContainerMain.setPadding(
+            0, 0, 0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, paddingBottom, resources.displayMetrics)
+                .toInt()
+        );
     }
 
 
+    val notifPermission = "android.permission.POST_NOTIFICATIONS";
+    val requestPermissionLauncher =  registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+        if (isGranted)
+            UIDialogs.toast(this, "Notification permission granted");
+        else
+            UIDialogs.toast(this, "Notification permission denied");
+    }
+    fun requestNotificationPermissions(reason: String) {
+        when {
+            ContextCompat.checkSelfPermission(this, notifPermission) == PackageManager.PERMISSION_GRANTED -> {
+
+            }
+
+            ActivityCompat.shouldShowRequestPermissionRationale(this, notifPermission) -> {
+                UIDialogs.showDialog(
+                    this, R.drawable.ic_notifications, "Notifications Required",
+                    reason, null, 0,
+                    UIDialogs.Action("Cancel", {}),
+                    UIDialogs.Action("Enable", {
+                        requestPermissionLauncher.launch(notifPermission);
+                    }, UIDialogs.ActionStyle.PRIMARY)
+                );
+            }
+
+            else -> {
+                requestPermissionLauncher.launch(notifPermission);
+            }
+        }
+    }
+
+    private val _toastQueue = ConcurrentLinkedQueue<ToastView.Toast>();
+    private var _toastJob: Job? = null;
+    fun showAppToast(toast: ToastView.Toast) {
+        synchronized(_toastQueue) {
+            _toastQueue.add(toast);
+            if (_toastJob?.isActive != true)
+                _toastJob = lifecycleScope.launch(Dispatchers.Default) {
+                    launchAppToastJob();
+                };
+        }
+    }
+
+    private suspend fun launchAppToastJob() {
+        Logger.i(TAG, "Starting appToast loop");
+        while (!_toastQueue.isEmpty()) {
+            val toast = _toastQueue.poll() ?: continue;
+            Logger.i(TAG, "Showing next toast (${toast.msg})");
+
+            lifecycleScope.launch(Dispatchers.Main) {
+                if (!_toastView.isVisible) {
+                    Logger.i(TAG, "First showing toast");
+                    _toastView.setToast(toast);
+                    _toastView.show(true);
+                } else {
+                    _toastView.setToastAnimated(toast);
+                }
+            }
+            if (toast.long)
+                delay(5000);
+            else
+                delay(2500);
+        }
+        Logger.i(TAG, "Ending appToast loop");
+        lifecycleScope.launch(Dispatchers.Main) {
+            _toastView.hide(true) {
+            };
+        }
+    }
+
 
     //TODO: Only calls last handler due to missing request codes on ActivityResultLaunchers.
-    private var resultLauncherMap =  mutableMapOf<Int, (ActivityResult)->Unit>();
+    private var resultLauncherMap = mutableMapOf<Int, (ActivityResult) -> Unit>();
     private var requestCode: Int? = -1;
     private val resultLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()) {
-            result: ActivityResult ->
+        ActivityResultContracts.StartActivityForResult()
+    ) { result: ActivityResult ->
         val handler = synchronized(resultLauncherMap) {
             resultLauncherMap.remove(requestCode);
         }
-        if(handler != null)
+        if (handler != null)
             handler(result);
     };
-    override fun launchForResult(intent: Intent, code: Int, handler: (ActivityResult)->Unit) {
+
+    override fun launchForResult(intent: Intent, code: Int, handler: (ActivityResult) -> Unit) {
         synchronized(resultLauncherMap) {
             resultLauncherMap[code] = handler;
         }
@@ -953,18 +1384,34 @@ class MainActivity : AppCompatActivity, IWithResultLauncher {
     companion object {
         private val TAG = "MainActivity"
 
-        fun getTabIntent(context: Context, tab: String) : Intent {
+        fun getTabIntent(context: Context, tab: String): Intent {
             val sourcesIntent = Intent(context, MainActivity::class.java);
             sourcesIntent.action = "TAB";
             sourcesIntent.putExtra("TAB", tab);
-            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             return sourcesIntent;
         }
-        fun getVideoIntent(context: Context, videoUrl: String) : Intent {
+
+        fun getVideoIntent(context: Context, videoUrl: String): Intent {
             val sourcesIntent = Intent(context, MainActivity::class.java);
             sourcesIntent.action = "VIDEO";
             sourcesIntent.putExtra("VIDEO", videoUrl);
-            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            return sourcesIntent;
+        }
+
+        fun getActionIntent(context: Context, action: String): Intent {
+            val sourcesIntent = Intent(context, MainActivity::class.java);
+            sourcesIntent.action = "ACTION";
+            sourcesIntent.putExtra("ACTION", action);
+            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            return sourcesIntent;
+        }
+
+        fun getImportOptionsIntent(context: Context): Intent {
+            val sourcesIntent = Intent(context, MainActivity::class.java);
+            sourcesIntent.action = "IMPORT_OPTIONS";
+            sourcesIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             return sourcesIntent;
         }
     }

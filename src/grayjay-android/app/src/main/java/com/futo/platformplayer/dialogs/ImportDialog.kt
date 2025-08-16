@@ -7,8 +7,8 @@ import android.graphics.drawable.Animatable
 import android.os.Bundle
 import android.text.Spannable
 import android.text.SpannableString
-import android.text.style.ForegroundColorSpan
 import android.text.method.ScrollingMovementMethod
+import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
@@ -17,12 +17,18 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.futo.platformplayer.*
+import com.futo.platformplayer.R
+import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.api.media.exceptions.NoPlatformClientException
+import com.futo.platformplayer.assume
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.models.ImportCache
 import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.states.StateBackup
 import com.futo.platformplayer.stores.v2.ManagedStore
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ImportDialog : AlertDialog {
     companion object {
@@ -62,13 +68,15 @@ class ImportDialog : AlertDialog {
     private val _name: String;
     private val _toImport: List<String>;
 
+    private val _cache: ImportCache?;
 
-    constructor(context: Context, importStore: ManagedStore<*>, name: String, toReconstruct: List<String>, onConcluded: ()->Unit): super(context) {
+    constructor(context: Context, importStore: ManagedStore<*>, name: String, toReconstruct: List<String>, cache: ImportCache?, onConcluded: ()->Unit): super(context) {
         _context = context;
         _store = importStore;
         _onConcluded = onConcluded;
         _name = name;
         _toImport = ArrayList(toReconstruct);
+        _cache = cache;
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,7 +107,6 @@ class ImportDialog : AlertDialog {
         _textProgress = findViewById(R.id.text_progress);
         _updateSpinner = findViewById(R.id.update_spinner);
 
-        val toMigrateCount = _store.getMissingReconstructionCount();
         _import_type_text.text = _store.name;
         _import_name_text.text = _name;
 
@@ -134,6 +141,8 @@ class ImportDialog : AlertDialog {
 
         setCancelable(false);
         setCanceledOnTouchOutside(false);
+
+        Logger.i(TAG, "Keep screen on set import")
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         _updateSpinner.drawable?.assume<Animatable>()?.start();
@@ -141,7 +150,7 @@ class ImportDialog : AlertDialog {
         val scope = StateApp.instance.scopeOrNull;
         scope?.launch(Dispatchers.IO) {
             try {
-                val migrationResult = _store.importReconstructions(_toImport) { finished, total ->
+                val migrationResult = _store.importReconstructions(_toImport, _cache) { finished, total ->
                     scope.launch(Dispatchers.Main) {
                         _textProgress.text = "${finished}/${total}";
                     }
@@ -201,6 +210,7 @@ class ImportDialog : AlertDialog {
                     } catch (e: Throwable) {
                         Logger.e(TAG, "Failed to update import UI.", e)
                     } finally {
+                        Logger.i(TAG, "Keep screen on unset update")
                         window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     }
                 }

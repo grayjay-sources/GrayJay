@@ -2,12 +2,12 @@ package com.futo.platformplayer.states
 
 import android.content.Context
 import androidx.collection.LruCache
+import androidx.lifecycle.lifecycleScope
 import com.futo.platformplayer.R
 import com.futo.platformplayer.Settings
 import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.api.media.IPlatformClient
 import com.futo.platformplayer.api.media.IPluginSourced
-import com.futo.platformplayer.api.media.PlatformClientPool
 import com.futo.platformplayer.api.media.PlatformMultiClientPool
 import com.futo.platformplayer.api.media.exceptions.NoPlatformClientException
 import com.futo.platformplayer.api.media.models.FilterGroup
@@ -22,27 +22,43 @@ import com.futo.platformplayer.api.media.models.contents.PlatformContentPlacehol
 import com.futo.platformplayer.api.media.models.live.ILiveChatWindowDescriptor
 import com.futo.platformplayer.api.media.models.live.IPlatformLiveEvent
 import com.futo.platformplayer.api.media.models.playback.IPlaybackTracker
+import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylist
 import com.futo.platformplayer.api.media.models.playlists.IPlatformPlaylistDetails
 import com.futo.platformplayer.api.media.models.video.IPlatformVideo
 import com.futo.platformplayer.api.media.platforms.js.DevJSClient
 import com.futo.platformplayer.api.media.platforms.js.JSClient
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
-import com.futo.platformplayer.api.media.structures.*
+import com.futo.platformplayer.api.media.structures.EmptyPager
+import com.futo.platformplayer.api.media.structures.IPager
+import com.futo.platformplayer.api.media.structures.MultiChronoContentPager
+import com.futo.platformplayer.api.media.structures.MultiDistributionChannelPager
+import com.futo.platformplayer.api.media.structures.MultiDistributionContentPager
+import com.futo.platformplayer.api.media.structures.PlaceholderPager
+import com.futo.platformplayer.api.media.structures.RefreshDistributionContentPager
 import com.futo.platformplayer.awaitFirstNotNullDeferred
 import com.futo.platformplayer.constructs.BatchedTaskHandler
 import com.futo.platformplayer.constructs.Event0
 import com.futo.platformplayer.constructs.Event1
+import com.futo.platformplayer.engine.exceptions.ScriptReloadRequiredException
 import com.futo.platformplayer.fromPool
 import com.futo.platformplayer.getNowDiffDays
 import com.futo.platformplayer.getNowDiffSeconds
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.models.ImageVariable
-import com.futo.platformplayer.stores.*
-import kotlinx.coroutines.*
-import okhttp3.internal.concat
+import com.futo.platformplayer.stores.FragmentedStorage
+import com.futo.platformplayer.stores.StringArrayStorage
+import com.futo.platformplayer.views.ToastView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.lang.Thread.sleep
 import java.time.OffsetDateTime
-import kotlin.reflect.jvm.internal.impl.builtins.jvm.JavaToKotlinClassMap.PlatformMutabilityMapping
-import kotlin.streams.toList
+import kotlin.streams.asSequence
 
 /***
  * Used to interact with sources/clients
@@ -76,14 +92,12 @@ class StatePlatform {
     private val _channelClientPool = PlatformMultiClientPool("Channels", 15); //Used primarily for subscription/background channel fetches
     private val _trackerClientPool = PlatformMultiClientPool("Trackers", 1); //Used exclusively for playback trackers
     private val _liveEventClientPool = PlatformMultiClientPool("LiveEvents", 1); //Used exclusively for live events
-
-
-    private val _primaryClientPersistent = FragmentedStorage.get<StringStorage>("primaryClient");
-    private var _primaryClientObj : IPlatformClient? = null;
-    val primaryClient : IPlatformClient get() = _primaryClientObj ?: throw IllegalStateException("PlatformState not yet initialized");
+    private val _privateClientPool = PlatformMultiClientPool("Private", 2, true); //Used primarily for calls if in incognito mode
+    private val _instantClientPool = PlatformMultiClientPool("Instant", 1, false, true); //Used for all instant calls
 
 
     private val _icons : HashMap<String, ImageVariable> = HashMap();
+    private val _iconsByName : HashMap<String, ImageVariable> = HashMap();
 
     val hasClients: Boolean get() = _availableClients.size > 0;
 
@@ -97,13 +111,24 @@ class StatePlatform {
     //Batched Requests
     private val _batchTaskGetVideoDetails: BatchedTaskHandler<String, IPlatformContentDetails> = BatchedTaskHandler<String, IPlatformContentDetails>(_scope,
         { url ->
+
             Logger.i(StatePlatform::class.java.name, "Fetching video details [${url}]");
-            _enabledClients.find { it.isContentDetailsUrl(url) }?.let {
-                _mainClientPool.getClientPooled(it).getContentDetails(url)
-            } ?: throw NoPlatformClientException("No client enabled that supports this url ($url)");
+            if(!StateApp.instance.privateMode) {
+                _enabledClients.find { _instantClientPool.getClientPooled(it).isContentDetailsUrl(url) }?.let {
+                    _mainClientPool.getClientPooled(it).getContentDetails(url)
+                }
+                    ?: throw NoPlatformClientException("No client enabled that supports this url ($url)");
+            }
+            else {
+                Logger.i(TAG, "Fetching details with private client");
+                _enabledClients.find { _instantClientPool.getClientPooled(it).isContentDetailsUrl(url) }?.let {
+                    _privateClientPool.getClientPooled(it).getContentDetails(url)
+                }
+                    ?: throw NoPlatformClientException("No client enabled that supports this url ($url)");
+            }
         },
         {
-            if(!Settings.instance.browsing.videoCache)
+            if(!Settings.instance.browsing.videoCache || StateApp.instance.privateMode)
                 return@BatchedTaskHandler null;
             else {
                 val cached = synchronized(_cache) { _cache.get(it); } ?: return@BatchedTaskHandler null;
@@ -119,7 +144,7 @@ class StatePlatform {
             }
         },
         { para, result ->
-            if(!Settings.instance.browsing.videoCache || (result is IPlatformVideo && result.isLive))
+            if(!Settings.instance.browsing.videoCache || (result is IPlatformVideo && result.isLive) || StateApp.instance.privateMode)
                 return@BatchedTaskHandler
             else {
                 Logger.i(TAG, "Caching [${para}]");
@@ -147,61 +172,68 @@ class StatePlatform {
 
 
     suspend fun updateAvailableClients(context: Context, reloadPlugins: Boolean = false) {
-        if(reloadPlugins)
+        if(reloadPlugins) {
             StatePlugins.instance.reloadPluginFile();
+        }
+
         withContext(Dispatchers.IO) {
             var enabled: Array<String>;
             synchronized(_clientsLock) {
-                for(enabled in _enabledClients) {
-                    enabled.disable();
-                    onSourceDisabled.emit(enabled);
+                for(e in _enabledClients) {
+                    try {
+                        e.disable();
+                        onSourceDisabled.emit(e);
+                    }
+                    catch(ex: Throwable) {
+                        UIDialogs.appToast(ToastView.Toast("If this happens often, please inform the developers on Github", false, null, "Plugin [${e.name}] failed to disable"));
+                    }
                 }
 
                 _enabledClients.clear();
                 _availableClients.clear();
-                //_availableClients.add(YoutubeClient());
-                //_availableClients.add(OdyseeClient());
 
                 _icons.clear();
+                _iconsByName.clear()
                 _icons[StateDeveloper.DEV_ID] = ImageVariable(null, R.drawable.ic_security_red);
 
                 StatePlugins.instance.updateEmbeddedPlugins(context);
                 StatePlugins.instance.installMissingEmbeddedPlugins(context);
 
-                for(plugin in StatePlugins.instance.getPlugins()) {
-
+                for (plugin in StatePlugins.instance.getPlugins()) {
                     _icons[plugin.config.id] = StatePlugins.instance.getPluginIconOrNull(plugin.config.id) ?:
+                            ImageVariable(plugin.config.absoluteIconUrl, null);
+                    _iconsByName[plugin.config.name.lowercase()] = StatePlugins.instance.getPluginIconOrNull(plugin.config.id) ?:
                             ImageVariable(plugin.config.absoluteIconUrl, null);
 
                     val client = JSClient(context, plugin);
-                    client.onCaptchaException.subscribe { client, ex ->
-                        StateApp.instance.handleCaptchaException(client, ex);
+                    client.onCaptchaException.subscribe { c, ex ->
+                        StateApp.instance.handleCaptchaException(c, ex);
                     }
                     _availableClients.add(client);
                 }
 
-                if(_availableClients.distinctBy { it.id }.count() < _availableClients.size)
-                    throw IllegalStateException("Attempted to add 2 clients with the same ID");
+                if(_availableClients.distinctBy { it.id }.count() < _availableClients.size) {
+                    val dups = _availableClients.filter { x-> _availableClients.count { it.id == x.id } > 1 };
+                    val overrideClients = _availableClients.distinctBy { it.id }
+                    _availableClients.clear();
+                    _availableClients.addAll(overrideClients);
+
+                    StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                        UIDialogs.showDialog(context, R.drawable.ic_error_pred, "Duplicate plugin ids detected", "This can cause unexpected behavior, ideally uninstall duplicate plugins (ids)",
+                            dups.map { it.name }.joinToString("\n"), 0, UIDialogs.Action("Ok", { }));
+                    }
+
+                    //throw IllegalStateException("Attempted to add 2 clients with the same ID");
+                }
 
                 enabled = _enabledClientsPersistent.getAllValues()
                     .filter { _availableClients.any { ac -> ac.id == it } }
                     .toTypedArray();
-                if(enabled.isEmpty())
+                if(enabled.isEmpty()) {
                     enabled = StatePlugins.instance.getEmbeddedSourcesDefault(context)
                         .filter { id -> _availableClients.any { it.id == id } }
                         .toTypedArray();
-
-
-                val primary = _primaryClientPersistent.value;
-                if(primary.isNullOrEmpty() || primary == StateDeveloper.DEV_ID)
-                    selectPrimaryClient(enabled.firstOrNull() ?: _availableClients.first().id);
-                else if(!_availableClients.any { it.id == primary })
-                    selectPrimaryClient(_availableClients.firstOrNull()?.id!!);
-                else
-                    selectPrimaryClient(primary);
-
-                if(!enabled.any { it == primaryClient.id })
-                    enabled = enabled.concat(primaryClient.id);
+                }
             }
             selectClients(*enabled);
         };
@@ -271,13 +303,33 @@ class StatePlatform {
         return null;
     }
 
+    fun getPlatformIconByName(name: String?) : ImageVariable? {
+        if(name == null)
+            return null;
+        val nameLower = name.lowercase()
+        if(_iconsByName.containsKey(nameLower))
+            return _iconsByName[nameLower];
+        return null;
+    }
+
     fun setPlatformOrder(platformOrder: List<String>) {
         _platformOrderPersistent.values.clear();
         _platformOrderPersistent.values.addAll(platformOrder);
         _platformOrderPersistent.save();
     }
 
-    suspend fun reloadClient(context: Context, id: String) : JSClient? {
+    fun handleReloadRequired(reloadRequiredException: ScriptReloadRequiredException, afterReload: (() -> Unit)? = null) {
+        val id = if(reloadRequiredException.config is SourcePluginConfig) reloadRequiredException.config.id else "";
+        UIDialogs.appToast("Reloading [${reloadRequiredException.config.name}] by plugin request");
+        StateApp.instance.scopeOrNull?.launch(Dispatchers.IO) {
+            if(!reloadRequiredException.reloadData.isNullOrEmpty())
+                reEnableClientWithData(id, reloadRequiredException.reloadData, afterReload);
+            else
+                reEnableClient(id, afterReload);
+        }
+    }
+
+    suspend fun reloadClient(context: Context, id: String, afterReload: (()->Unit)? = null) : JSClient? {
         return withContext(Dispatchers.IO) {
             val client = getClient(id);
             if (client !is JSClient)
@@ -292,8 +344,8 @@ class StatePlatform {
                     StatePlugins.instance.getPlugin(id)
                         ?: throw IllegalStateException("Client existed, but plugin config didn't")
                 );
-            newClient.onCaptchaException.subscribe { client, ex ->
-                StateApp.instance.handleCaptchaException(client, ex);
+            newClient.onCaptchaException.subscribe { c, ex ->
+                StateApp.instance.handleCaptchaException(c, ex);
             }
 
             synchronized(_clientsLock) {
@@ -304,24 +356,48 @@ class StatePlatform {
                     newClient.initialize();
                     _enabledClients.add(newClient);
                 }
-                if (_primaryClientObj == client)
-                    _primaryClientObj = newClient;
 
                 _availableClients.removeIf { it.id == id };
                 _availableClients.add(newClient);
             }
+            afterReload?.invoke();
             return@withContext newClient;
         };
     }
 
+    suspend fun reEnableClientWithData(id: String, data: String? = null, afterReload: (()->Unit)? = null) {
+        val enabledBefore = getEnabledClients().map { it.id };
+        if(data != null) {
+            val client = getClientOrNull(id);
+            if(client != null && client is JSClient)
+                client.setReloadData(data);
+        }
+        selectClients({
+            _scope.launch(Dispatchers.IO) {
+                selectClients({
+                    afterReload?.invoke();
+                }, *(enabledBefore).distinct().toTypedArray());
+            }
+        }, *(enabledBefore.filter { it != id }).distinct().toTypedArray())
+    }
+    suspend fun reEnableClient(id: String, afterReload: (()->Unit)? = null) = reEnableClientWithData(id, null, afterReload);
+
+    suspend fun enableClient(ids: List<String>) {
+        val currentClients = getEnabledClients().map { it.id };
+        selectClients(*(currentClients + ids).distinct().toTypedArray());
+    }
     /**
      * Selects the enabled clients, meaning all clients that data is actively requested from.
      * If a client is disabled, NO requests are made to said client
      */
     suspend fun selectClients(vararg ids: String) {
+        selectClients(null, *ids);
+    }
+    suspend fun selectClients(afterLoad: (() -> Unit)?, vararg ids: String) {
         withContext(Dispatchers.IO) {
+            var removed: MutableList<IPlatformClient>;
             synchronized(_clientsLock) {
-                val removed = _enabledClients.toMutableList();
+                removed = _enabledClients.toMutableList();
                 _enabledClients.clear();
                 for (id in ids) {
                     val client = getClient(id);
@@ -337,24 +413,14 @@ class StatePlatform {
                 }
                 _enabledClientsPersistent.set(*ids);
                 _enabledClientsPersistent.save();
-
-                for (oldClient in removed) {
-                    oldClient.disable();
-                    onSourceDisabled.emit(oldClient);
-                }
             }
-        };
-    }
 
-    /**
-     * Selects the primary client, meaning the first target for requests.
-     * At the moment, since multi-client requests are not yet implemented, this is the goto client.
-     */
-    fun selectPrimaryClient(id: String) {
-        synchronized(_clientsLock) {
-            _primaryClientObj = getClient(id);
-            _primaryClientPersistent.setAndSave(id);
-        }
+            for (oldClient in removed) {
+                oldClient.disable();
+                onSourceDisabled.emit(oldClient);
+            }
+            afterLoad?.invoke();
+        };
     }
 
     fun getHome(): IPager<IPlatformContent> {
@@ -389,10 +455,52 @@ class StatePlatform {
                 }
                 return@map homeResult;
             }
+            .asSequence()
             .toList()
             .associateWith { 1f };
 
         val pager = MultiDistributionContentPager(pages);
+        pager.initialize();
+        return pager;
+    }
+    fun getShorts(): IPager<IPlatformVideo> {
+        Logger.i(TAG, "Platform - getShorts");
+        var clientIdsOngoing = mutableListOf<String>();
+        val clients = getSortedEnabledClient().filter { if (it is JSClient) it.enableInShorts else true };
+
+        StateApp.instance.scopeOrNull?.let {
+            it.launch(Dispatchers.Default) {
+                try {
+                    // plugins that take longer than 5 seconds to load are considered "slow"
+                    delay(5000);
+                    val slowClients = synchronized(clientIdsOngoing) {
+                        return@synchronized clients.filter { clientIdsOngoing.contains(it.id) };
+                    };
+                    for(client in slowClients)
+                        UIDialogs.toast("${client.name} is still loading..\nConsider disabling it for Home", false);
+                } catch (e: Throwable) {
+                    Logger.e(TAG, "Failed to show toast for slow source.", e)
+                }
+            }
+        }
+
+        val pages = clients.parallelStream()
+            .map {
+                Logger.i(TAG, "getShorts - ${it.name}")
+                synchronized(clientIdsOngoing) {
+                    clientIdsOngoing.add(it.id);
+                }
+                val shortsResult = it.fromPool(_pagerClientPool).getShorts();
+                synchronized(clientIdsOngoing) {
+                    clientIdsOngoing.remove(it.id);
+                }
+                return@map shortsResult;
+            }
+            .asSequence()
+            .toList()
+            .associateWith { 1f };
+
+        val pager = MultiDistributionContentPager(pages, 2);
         pager.initialize();
         return pager;
     }
@@ -403,7 +511,12 @@ class StatePlatform {
         val deferred: List<Pair<IPlatformClient, Deferred<IPager<IPlatformContent>?>>> = clients.map {
             return@map Pair(it, scope.async(Dispatchers.IO) {
                 try {
-                    val searchResult = it.fromPool(_pagerClientPool).getHome();
+                    var searchResult = it.fromPool(_pagerClientPool).getHome();
+                    if(searchResult.getResults().size == 0) {
+                        Logger.i(TAG, "No home results, retrying");
+                        sleep(500);
+                        searchResult = it.fromPool(_pagerClientPool).getHome();
+                    }
                     return@async searchResult;
                 } catch(ex: Throwable) {
                     Logger.e(TAG, "getHomeRefresh", ex);
@@ -423,14 +536,12 @@ class StatePlatform {
             toAwait.map { PlaceholderPager(5, { PlatformContentPlaceholder(it.first.id) }) });
     }
 
-    fun getHomePrimary(): IPager<IPlatformContent> {
-        return primaryClient.getHome();
-    }
 
     //Search
     fun searchSuggestions(query: String): Array<String> {
         Logger.i(TAG, "Platform - searchSuggestions");
-        return primaryClient.searchSuggestions(query);
+        //TODO: hasSearchSuggestions
+        return getEnabledClients().firstOrNull()?.searchSuggestions(query) ?: arrayOf();
     }
 
     fun search(query: String, type: String? = null, sort: String? = null, filters: Map<String, List<String>> = mapOf(), clientIds: List<String>? = null): IPager<IPlatformContent> {
@@ -513,7 +624,7 @@ class StatePlatform {
             else getSortedEnabledClient().filter { if (it is JSClient) it.enableInSearch else true };
 
         clients.parallelStream().forEach {
-            val searchCapabilities = it.getSearchCapabilities();
+            val searchCapabilities = it.getSearchChannelContentsCapabilities();
             val mappedFilters = filters.map { pair -> Pair(pair.key, pair.value.map { v -> searchCapabilities.filters.first { g -> g.idOrName == pair.key }.filters.first { f -> f.idOrName == v }.value }) }.toMap();
 
             if (it.isChannelUrl(channelUrl)) {
@@ -527,12 +638,23 @@ class StatePlatform {
     }
 
     fun getCommonSearchCapabilities(clientIds: List<String>): ResultCapabilities? {
+        return getCommonSearchCapabilitiesType(clientIds){
+            it.getSearchCapabilities()
+        };
+    }
+    fun getCommonSearchChannelContentsCapabilities(clientIds: List<String>): ResultCapabilities? {
+        return getCommonSearchCapabilitiesType(clientIds){
+            it.getSearchChannelContentsCapabilities()
+        };
+    }
+
+    fun getCommonSearchCapabilitiesType(clientIds: List<String>, capabilitiesGetter: (client: IPlatformClient)-> ResultCapabilities): ResultCapabilities? {
         try {
             Logger.i(TAG, "Platform - getCommonSearchCapabilities");
 
             val clients = getEnabledClients().filter { clientIds.contains(it.id) };
             val c = clients.firstOrNull() ?: return null;
-            val cap = c.getSearchCapabilities();
+            val cap = capabilitiesGetter(c)//c.getSearchCapabilities();
 
             //var types = arrayListOf<String>();
             var sorts = cap.sorts.toMutableList();
@@ -542,7 +664,7 @@ class StatePlatform {
             val filtersToRemove = arrayListOf<Int>();
 
             for (i in 1 until clients.size) {
-                val clientSearchCapabilities = clients[i].getSearchCapabilities();
+                val clientSearchCapabilities = capabilitiesGetter(clients[i]);//.getSearchCapabilities();
 
                 for (j in 0 until sorts.size) {
                     if (!clientSearchCapabilities.sorts.contains(sorts[j])) {
@@ -597,12 +719,33 @@ class StatePlatform {
         return pager;
     }
 
+    fun searchChannelsAsContent(query: String): IPager<IPlatformContent> {
+        Logger.i(TAG, "Platform - searchChannels");
+        val pagers = mutableMapOf<IPager<IPlatformContent>, Float>();
+        getSortedEnabledClient().parallelStream().forEach {
+            try {
+                if (it.capabilities.hasChannelSearch)
+                    pagers.put(it.searchChannelsAsContent(query), 1f);
+            }
+            catch(ex: Throwable) {
+                Logger.e(TAG, "Failed search channels", ex)
+                UIDialogs.toast("Failed search channels on [${it.name}]\n(${ex.message})");
+            }
+        };
+        if(pagers.isEmpty())
+            return EmptyPager<IPlatformContent>();
+
+        val pager = MultiDistributionContentPager(pagers);
+        pager.initialize();
+        return pager;
+    }
+
 
     //Video
-    fun hasEnabledVideoClient(url: String) : Boolean = getEnabledClients().any { it.isContentDetailsUrl(url) };
+    fun hasEnabledContentClient(url: String) : Boolean = getEnabledClients().any { _instantClientPool.getClientPooled(it).isContentDetailsUrl(url) };
     fun getContentClient(url: String) : IPlatformClient = getContentClientOrNull(url)
-        ?: throw NoPlatformClientException("No client enabled that supports this channel url (${url})");
-    fun getContentClientOrNull(url: String) : IPlatformClient? = getEnabledClients().find { it.isContentDetailsUrl(url) };
+        ?: throw NoPlatformClientException("No client enabled that supports this content url (${url})");
+    fun getContentClientOrNull(url: String) : IPlatformClient? = getEnabledClients().find { _instantClientPool.getClientPooled(it).isContentDetailsUrl(url) };
     fun getContentDetails(url: String, forceRefetch: Boolean = false): Deferred<IPlatformContentDetails> {
         Logger.i(TAG, "Platform - getContentDetails (${url})");
         if(forceRefetch)
@@ -634,25 +777,35 @@ class StatePlatform {
         return client.getPlaybackTracker(url);
     }
 
-    fun hasEnabledChannelClient(url : String) : Boolean = getEnabledClients().any { it.isChannelUrl(url) };
+    fun getContentRecommendations(url: String): IPager<IPlatformContent>? {
+        val baseClient = getContentClientOrNull(url) ?: return null;
+        if (baseClient !is JSClient) {
+            return baseClient.getContentRecommendations(url);
+        }
+        val client = _mainClientPool.getClientPooled(baseClient);
+        return client.getContentRecommendations(url);
+    }
+
+    fun hasEnabledChannelClient(url : String) : Boolean = getEnabledClients().any { _instantClientPool.getClientPooled(it).isChannelUrl(url) };
     fun getChannelClient(url : String, exclude: List<String>? = null) : IPlatformClient = getChannelClientOrNull(url, exclude)
         ?: throw NoPlatformClientException("No client enabled that supports this channel url (${url})");
     fun getChannelClientOrNull(url : String, exclude: List<String>? = null) : IPlatformClient? =
         if(exclude == null)
-            getEnabledClients().find { it.isChannelUrl(url) }
+            getEnabledClients().find { _instantClientPool.getClientPooled(it).isChannelUrl(url) }
         else
-            getEnabledClients().find { !exclude.contains(it.id) && it.isChannelUrl(url) };
+            getEnabledClients().find { !exclude.contains(it.id) && _instantClientPool.getClientPooled(it).isChannelUrl(url) };
 
     fun getChannel(url: String, updateSubscriptions: Boolean = true): Deferred<IPlatformChannel>  {
         Logger.i(TAG, "Platform - getChannel");
         val channel = StateSubscriptions.instance.getSubscription(url);
-        if(channel != null)
-            return _scope.async { getChannelLive(url, updateSubscriptions) }; //_batchTaskGetChannel.execute(channel);
-        else
-            return _scope.async { getChannelLive(url, updateSubscriptions) };
+        return if(channel != null) {
+            _scope.async { getChannelLive(url, updateSubscriptions) }; //_batchTaskGetChannel.execute(channel);
+        } else {
+            _scope.async { getChannelLive(url, updateSubscriptions) };
+        }
     }
 
-    fun getChannelContent(baseClient: IPlatformClient, channelUrl: String, isSubscriptionOptimized: Boolean = false, usePooledClients: Int = 0, ignorePlugins: List<String>? = null): IPager<IPlatformContent> {
+    fun getChannelContent(baseClient: IPlatformClient, channelUrl: String, isSubscriptionOptimized: Boolean = false, usePooledClients: Int = 0, type: String? = null): IPager<IPlatformContent> {
         val clientCapabilities = baseClient.getChannelCapabilities();
         val client = if(usePooledClients > 1)
             _channelClientPool.getClientPooled(baseClient, usePooledClients);
@@ -661,62 +814,75 @@ class StatePlatform {
         var lastStream: OffsetDateTime? = null;
 
         val pagerResult: IPager<IPlatformContent>;
-        if(!clientCapabilities.hasType(ResultCapabilities.TYPE_MIXED) &&
-            clientCapabilities.hasType(ResultCapabilities.TYPE_VIDEOS) &&
-            clientCapabilities.hasType(ResultCapabilities.TYPE_STREAMS)) {
-            val toQuery = mutableListOf<String>();
-            if(clientCapabilities.hasType(ResultCapabilities.TYPE_VIDEOS))
-                toQuery.add(ResultCapabilities.TYPE_VIDEOS);
-            if(clientCapabilities.hasType(ResultCapabilities.TYPE_STREAMS))
-                toQuery.add(ResultCapabilities.TYPE_STREAMS);
-            if(clientCapabilities.hasType(ResultCapabilities.TYPE_LIVE))
-                toQuery.add(ResultCapabilities.TYPE_LIVE);
-            if(clientCapabilities.hasType(ResultCapabilities.TYPE_POSTS))
-                toQuery.add(ResultCapabilities.TYPE_POSTS);
+        if (type == null) {
+            if(!clientCapabilities.hasType(ResultCapabilities.TYPE_MIXED) &&
+                    (   clientCapabilities.hasType(ResultCapabilities.TYPE_VIDEOS) ||
+                        clientCapabilities.hasType(ResultCapabilities.TYPE_STREAMS) ||
+                        clientCapabilities.hasType(ResultCapabilities.TYPE_LIVE) ||
+                        clientCapabilities.hasType(ResultCapabilities.TYPE_POSTS)
+                    )) {
+                val toQuery = mutableListOf<String>();
+                if(clientCapabilities.hasType(ResultCapabilities.TYPE_VIDEOS))
+                    toQuery.add(ResultCapabilities.TYPE_VIDEOS);
+                if(clientCapabilities.hasType(ResultCapabilities.TYPE_STREAMS))
+                    toQuery.add(ResultCapabilities.TYPE_STREAMS);
+                if(clientCapabilities.hasType(ResultCapabilities.TYPE_LIVE))
+                    toQuery.add(ResultCapabilities.TYPE_LIVE);
+                if(clientCapabilities.hasType(ResultCapabilities.TYPE_POSTS))
+                    toQuery.add(ResultCapabilities.TYPE_POSTS);
 
-            if(isSubscriptionOptimized) {
-                val sub = StateSubscriptions.instance.getSubscription(channelUrl);
-                if(sub != null) {
-                    if(!sub.shouldFetchStreams()) {
-                        Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 7 days, skipping live streams [${sub.lastLiveStream.getNowDiffDays()} days ago]");
-                        toQuery.remove(ResultCapabilities.TYPE_LIVE);
-                    }
-                    if(!sub.shouldFetchLiveStreams()) {
-                        Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 15 days, skipping streams [${sub.lastLiveStream.getNowDiffDays()} days ago]");
-                        toQuery.remove(ResultCapabilities.TYPE_STREAMS);
-                    }
-                    if(!sub.shouldFetchPosts()) {
-                        Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 5 days, skipping posts [${sub.lastPost.getNowDiffDays()} days ago]");
-                        toQuery.remove(ResultCapabilities.TYPE_POSTS);
-                    }
-                }
-            }
-
-            //Merged pager
-            val pagers = toQuery
-                .parallelStream()
-                .map {
-                    val results = client.getChannelContents(channelUrl, it, ResultCapabilities.ORDER_CHONOLOGICAL) ;
-
-                    when(it) {
-                        ResultCapabilities.TYPE_STREAMS -> {
-                            val streamResults = results.getResults();
-                            if(streamResults.size == 0)
-                                lastStream = OffsetDateTime.MIN;
-                            else
-                                lastStream = results.getResults().firstOrNull()?.datetime;
+                if(isSubscriptionOptimized) {
+                    val sub = StateSubscriptions.instance.getSubscription(channelUrl);
+                    if(sub != null) {
+                        if(!sub.shouldFetchStreams()) {
+                            Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 7 days, skipping live streams [${sub.lastLiveStream.getNowDiffDays()} days ago]");
+                            toQuery.remove(ResultCapabilities.TYPE_LIVE);
+                        }
+                        if(!sub.shouldFetchLiveStreams()) {
+                            Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 15 days, skipping streams [${sub.lastLiveStream.getNowDiffDays()} days ago]");
+                            toQuery.remove(ResultCapabilities.TYPE_STREAMS);
+                        }
+                        if(!sub.shouldFetchPosts()) {
+                            Logger.i(TAG, "Subscription [${sub.channel.name}:${channelUrl}] Last livestream > 5 days, skipping posts [${sub.lastPost.getNowDiffDays()} days ago]");
+                            toQuery.remove(ResultCapabilities.TYPE_POSTS);
                         }
                     }
-                    return@map results;
                 }
-                .toList();
 
-            val pager = MultiChronoContentPager(pagers.toTypedArray());
-            pager.initialize();
-            pagerResult = pager;
+                //Merged pager
+                val pagers = toQuery
+                    .parallelStream()
+                    .map {
+                        val results = client.getChannelContents(channelUrl, it, ResultCapabilities.ORDER_CHONOLOGICAL) ;
+
+                        when(it) {
+                            ResultCapabilities.TYPE_STREAMS -> {
+                                val streamResults = results.getResults();
+                                if(streamResults.size == 0)
+                                    lastStream = OffsetDateTime.MIN;
+                                else
+                                    lastStream = results.getResults().firstOrNull()?.datetime;
+                            }
+                        }
+                        return@map results;
+                    }
+                    .asSequence()
+                    .toList();
+
+                val pager = MultiChronoContentPager(pagers.toTypedArray());
+                pager.initialize();
+                pagerResult = pager;
+            }
+            else {
+                pagerResult = client.getChannelContents(channelUrl, ResultCapabilities.TYPE_MIXED, ResultCapabilities.ORDER_CHONOLOGICAL);
+            }
+        } else {
+            pagerResult = if (type == ResultCapabilities.TYPE_SHORTS && clientCapabilities.hasType(ResultCapabilities.TYPE_SHORTS)) {
+                client.getChannelContents(channelUrl, ResultCapabilities.TYPE_SHORTS, ResultCapabilities.ORDER_CHONOLOGICAL);
+            } else {
+                EmptyPager()
+            }
         }
-        else
-            pagerResult = client.getChannelContents(channelUrl, ResultCapabilities.TYPE_MIXED, ResultCapabilities.ORDER_CHONOLOGICAL);
 
         //Subscription optimization
         val sub = StateSubscriptions.instance.getSubscription(channelUrl);
@@ -768,10 +934,10 @@ class StatePlatform {
 
         return pagerResult;
     }
-    fun getChannelContent(channelUrl: String, isSubscriptionOptimized: Boolean = false, usePooledClients: Int = 0, ignorePlugins: List<String>? = null): IPager<IPlatformContent> {
+    fun getChannelContent(channelUrl: String, isSubscriptionOptimized: Boolean = false, usePooledClients: Int = 0, ignorePlugins: List<String>? = null, type: String? = null): IPager<IPlatformContent> {
         Logger.i(TAG, "Platform - getChannelVideos");
         val baseClient = getChannelClient(channelUrl, ignorePlugins);
-        return getChannelContent(baseClient, channelUrl, isSubscriptionOptimized, usePooledClients, ignorePlugins);
+        return getChannelContent(baseClient, channelUrl, isSubscriptionOptimized, usePooledClients, type);
     }
     fun getChannelContent(channelUrl: String, type: String?, ordering: String = ResultCapabilities.ORDER_CHONOLOGICAL): IPager<IPlatformContent> {
         val client = getChannelClient(channelUrl);
@@ -782,6 +948,15 @@ class StatePlatform {
         return client.getChannelContents(channelUrl, type, ordering) ;
     }
 
+    fun getChannelPlaylists(channelUrl: String): IPager<IPlatformPlaylist> {
+        val client = getChannelClient(channelUrl);
+        return client.getChannelPlaylists(channelUrl);
+    }
+
+    fun peekChannelContents(baseClient: IPlatformClient, channelUrl: String, type: String?): List<IPlatformContent> {
+        val client = _channelClientPool.getClientPooled(baseClient, Settings.instance.subscriptions.getSubscriptionsConcurrency());
+        return client.peekChannelContents(channelUrl, type) ;
+    }
 
     fun getChannelLive(url: String, updateSubscriptions: Boolean = true): IPlatformChannel {
         val channel = getChannelClient(url).getChannel(url);
@@ -814,8 +989,9 @@ class StatePlatform {
         return urls;
     }
 
-    fun getPlaylistClientOrNull(url: String): IPlatformClient? = getEnabledClients().find { it.isPlaylistUrl(url) }
-    fun getPlaylistClient(url: String): IPlatformClient = getEnabledClients().find { it.isPlaylistUrl(url) }
+    fun hasEnabledPlaylistClient(url: String) : Boolean = getEnabledClients().any { _instantClientPool.getClientPooled(it).isPlaylistUrl(url) };
+    fun getPlaylistClientOrNull(url: String): IPlatformClient? = getEnabledClients().find { _instantClientPool.getClientPooled(it).isPlaylistUrl(url) }
+    fun getPlaylistClient(url: String): IPlatformClient = getEnabledClients().find { _instantClientPool.getClientPooled(it).isPlaylistUrl(url) }
         ?: throw NoPlatformClientException("No client enabled that supports this playlist url (${url})");
     fun getPlaylist(url: String): IPlatformPlaylistDetails {
         return getPlaylistClient(url).getPlaylist(url);
@@ -834,7 +1010,10 @@ class StatePlatform {
         if(!client.capabilities.hasGetComments)
             return EmptyPager();
 
-        return client.fromPool(_mainClientPool).getComments(url);
+        if(!StateApp.instance.privateMode)
+            return client.fromPool(_pagerClientPool).getComments(url);
+        else
+            return client.fromPool(_privateClientPool).getComments(url);
     }
     fun getSubComments(comment: IPlatformComment): IPager<IPlatformComment> {
         Logger.i(TAG, "Platform - getSubComments");
@@ -845,7 +1024,11 @@ class StatePlatform {
     fun getLiveEvents(url: String): IPager<IPlatformLiveEvent>? {
         Logger.i(TAG, "Platform - getLiveChat");
         var client = getContentClient(url);
-        return client.fromPool(_liveEventClientPool).getLiveEvents(url);
+
+        if(!StateApp.instance.privateMode)
+            return client.fromPool(_liveEventClientPool).getLiveEvents(url);
+        else
+            return client.fromPool(_privateClientPool).getLiveEvents(url);
     }
     fun getLiveChatWindow(url: String): ILiveChatWindowDescriptor? {
         Logger.i(TAG, "Platform - getLiveChat");
@@ -853,13 +1036,22 @@ class StatePlatform {
         return client.getLiveChatWindow(url);
     }
 
+    //Account
+    fun getUserHistory(id: String): IPager<IPlatformContent> {
+        val client = getClient(id);
+        if(client is JSClient && client.isLoggedIn) {
+            return client.fromPool(_pagerClientPool).getUserHistory()
+        }
+        return EmptyPager<IPlatformContent>();
+    }
+
+
 
     fun injectDevPlugin(source: SourcePluginConfig, script: String): String? {
         var devId: String? = null;
         synchronized(_clientsLock) {
             val enabledExisting = _enabledClients.filter { it is DevJSClient };
             val isEnabled = !enabledExisting.isEmpty()
-            val isPrimary = _primaryClientObj is DevJSClient;
 
             for (enabled in enabledExisting) {
                 enabled.disable();
@@ -874,18 +1066,9 @@ class StatePlatform {
             devId = newClient.devID;
             try {
                 StateDeveloper.instance.initializeDev(devId!!);
-                var didEnable = false;
-                if (isPrimary) {
-                    _primaryClientObj = newClient;
-                    _enabledClients.add(0, newClient);
-                    newClient.initialize();
-                    didEnable = true;
-                } else if (isEnabled) {
+                if (isEnabled) {
                     _enabledClients.add(newClient);
-                    if(!didEnable) {
-                        newClient.initialize();
-                        didEnable = true;
-                    }
+                    newClient.initialize();
                 }
                 _availableClients.add(newClient);
             } catch (ex: Exception) {
@@ -911,6 +1094,8 @@ class StatePlatform {
             }
         }
     }
+
+
 
     companion object {
         private var _instance : StatePlatform? = null;

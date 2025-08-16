@@ -7,6 +7,9 @@
 	    <!--<link href="./dependencies/vuetify.min.css" rel="stylesheet">-->
 		<link href="https://cdn.jsdelivr.net/npm/vuetify@2.7.1/dist/vuetify.min.css" rel="stylesheet">
 
+		<title>DevPortal</title>
+		<link rel="icon" type="image/x-icon" href="/favicon.svg">
+
 	  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
 	
 		<style>
@@ -150,7 +153,7 @@
 			.pastPluginUrl {
 			    margin-left: auto;
 				margin-right: auto;
-				width: 500px;
+				width: 700px;
 				text-align: center;
 				margin-top: 10px;
 				margin-bottom: 10px;
@@ -160,13 +163,122 @@
 				box-shadow: 0px 1px 2px #131313;
 				font-weight: lighter;
 				cursor: pointer;
+				position: relative;
+			}
+			.pastPluginUrl .deleteButton {
+				position: absolute;
+				right: 15px;
+				height: 100%;
+				width: 30px;
+				top: 0px;
+				padding-top: 2px;
+				display: grid;
+				justify-items: center;
+				align-items: center;
+				cursor: pointer;
+				font-weight: 400;
+				transform: scaleX(1.5);
+			}
+
+			[v-cloak] {
+				display: none;
+			}
+			#cloakLoader {
+				display: block;
+				position: absolute;
+				text-align: center;
+				left: 0px;
+				top: 0px;
+				width: 100%;
+				height: 100%;
+				background-color: black;
+				color: white;
+				padding-top: 50px;
+				font-family: sans-serif;
+			}
+			.httpContainer {
+				position: relative;
+			}
+			.httpLine {
+			}
+			.httpLine .request {
+				height: 50px;
+				position: relative;
+				cursor: pointer;
+			}
+			.httpLine .request .status {
+				position: absolute;
+				left: 10px;
+				width: 40px;
+				top: 10px;
+				padding: 5px;
+				background-color: #333;
+				border-radius: 5px;
+				text-align: center;
+			}
+			.httpLine .request .status.error {
+				background-color: #880000;
+			}
+			.httpLine .request .status.success {
+				background-color: #008800;
+			}
+			.httpLine .request .status.warn {
+				background-color: #803500;
+			}
+			.httpLine .request .method {
+				position: absolute;
+				left: 55px;
+				top: 10px;
+				padding: 5px;
+				background-color: #333;
+				border-radius: 5px;
+				width: 50px;
+				text-align: center;
+			}
+			.httpLine .request .url {
+				position: absolute;
+				left: 110px;
+				top: 10px;
+				padding: 5px;
+				background-color: #333;
+				border-radius: 5px;
+			}
+			.httpLine .response {
+				background-color: #111;
+    			margin-left: 55px;
+    			border-radius: 6px;
+    			padding: 10px;
+			}
+			.httpLine .response .body{
+				white-space: pre-wrap;
+				font-family: monospace;
+				background-color: black;
+				padding: 10px;
+			}
+			.httpLine .response .headers {
+				margin: 10px;
+			}
+			.httpLine .response .headers .key {
+				display: inline-block;
+				font-weight: bold;
+				font-size: 14px;
+				color: #FFF;
+			}
+			.httpLine .response .headers .value {
+				display: inline-block;
+				font-size: 14px;
+				color: #AAA;
 			}
 		</style>
 	</head>
 	<body>
 	  <div id="app">
 		<v-app>
-		  <v-main>
+			<div v-cloak id="cloakLoader" v-if="!page">
+				<h2>Loading..</h2>
+				First load may take longer
+			</div>
+		  <v-main v-cloak>
 			<div id="topMenu">
 				<div style="height: 100%; display: inline-block; padding-left: 10px; padding-right: 20px;">
 					<img src="./dependencies/FutoMainLogo.svg"
@@ -250,10 +362,13 @@
 						</div>
 
 
-						<div v-if="pastPluginUrls" style="margin-top: 60px;">
+						<div v-if="pastPluginUrls" style="margin-top: 60px; margin-left: 25px;">
 							<h2 style="font-weight: lighter; text-align: center;">Past Plugins</h2>
 							<div class="pastPluginUrl" v-for="pastPluginUrl in pastPluginUrls" @click="this.Plugin.newPluginUrl = pastPluginUrl; loadPlugin(pastPluginUrl)">
 								{{pastPluginUrl}}
+								<div class="deleteButton" @click="(ev)=>{ev.stopPropagation(); deletePastPlugin(pastPluginUrl)}">
+									X
+								</div>
 							</div>
 						</div>
 					</div>
@@ -385,8 +500,8 @@
 						</v-card-text>
 					</v-card>
 					<div style="width: 50%" v-if="Plugin.currentPlugin">
-						<!--Get Home-->
-						<v-card class="requestCard" v-for="req in Testing.requests">
+						<v-text-field v-model="searchTestMethods" label="Search for source methods.." style="margin-left: 35px; margin-right: 35px;"></v-text-field>
+						<v-card class="requestCard" v-for="req in Testing.requests" v-show="req.title.indexOf(searchTestMethods) >= 0">
 							<v-card-text>
 								<div class="title">
 									<span v-if="req.isOptional">(Optional)</span>
@@ -402,6 +517,11 @@
 								<div class="code">
 									{{req.code}}
 								</div>
+								<div class="documentation" v-if="req.docUrl" style="position: absolute; right: 15px; top: 15px;">
+									<a :href="req.docUrl" target="_blank">
+										Documentation
+									</a>
+								</div>
 								<div>
 									<div class="parameter" v-for="parameter in req.parameters">
 										<div class="name">
@@ -416,6 +536,9 @@
 							</v-card-text>
 							<v-card-actions>
 								<v-spacer></v-spacer>
+								<v-btn @click="testSourceRemotely(req)">
+									Test Android
+								</v-btn>
 								<v-btn @click="testSource(req)">
 									Test
 								</v-btn>
@@ -497,7 +620,62 @@
 						</v-card-text>
 						<v-card-actions>
 							<v-spacer></v-spacer>
-							<v-btn>Clear</v-btn>
+							<v-btn @click="Integration.logs = []">Clear</v-btn>
+						</v-card-actions>
+					</v-card>
+					<v-card style="margin: 20px;" v-if="Plugin.currentPlugin && Integration.httpExchanges">
+						<v-card-title>
+							Http Logs
+						</v-card-title>
+						</v-card-header>
+						<v-card-text>
+							<div style="position: absolute; top: 0px; right: 15px;">
+								<v-checkbox v-model="Integration.showHttpRequests" label="Show Http Requests"></v-checkbox>
+							</div>
+							<div class="httpContainer" v-if="Integration.showHttpRequests">
+								<div class="httpLine" v-for="exchange of Integration.httpExchanges">
+									<div class="request" @click="toggleHttpExchange(exchange)">
+										<div :class="[{ success: exchange.response.status < 300, warn: exchange.response.status >= 300 && exchange.response.status < 400, error: exchange.response.status >= 400 }, 'status']">
+											{{exchange.response.status}}
+										</div>
+										<div class="method">
+											{{exchange.request.method}}
+										</div>
+										<div class="url">
+											{{exchange.request.url}}
+										</div>
+									</div>
+									<div class="response" v-if="exchange.response.show">
+										<h2>Request Headers</h2>
+										<div class="headers">
+											<div class="header" v-for="(headerValue, header) in exchange.request.headers">
+												<div class="key">
+													{{header}}
+												</div>
+												<div class="value">
+													{{headerValue}}
+												</div>
+											</div>
+										</div>
+										<h2>Response</h2>
+										<div class="headers">
+											<div class="header" v-for="(headerValue, header) in exchange.response.headers">
+												<div class="key">
+													{{header}}
+												</div>
+												<div class="value">
+													{{headerValue}}
+												</div>
+											</div>
+										</div>
+										<div class="body">{{exchange.response.body}}</div>
+									</div>
+								</div>
+							</div>
+						</v-card-text>
+						<v-card-actions>
+							<v-spacer></v-spacer>
+							<v-btn v-if="Integration.showHttpRequests" @click="Integration.httpExchanges = []">Clear</v-btn>
 						</v-card-actions>
 					</v-card>
 				</div>
@@ -535,14 +713,18 @@
 	  <!--<script src="./dependencies/vue.js"></script>-->
 	  <!--<script src="./dependencies/vuetify.js"></script>-->
 	  <script src="./source_docs.js"></script>
+	  <script src="./source_doc_urls.js"></script>
 	  <script src="./source.js"></script>
 	  <script src="./dev_bridge.js"></script>
 	  <script>
 	  	IS_TESTING = true;
 	  	let lastScriptTag = null;
+	  	let shouldDevLog = true;
+	  	let shouldLoginCheck = true;
 		new Vue({
 		  el: '#app',
 		  data: {
+		  	searchTestMethods: "",
 			page: "Plugin",
 			pastPluginUrls: [],
 			settings: {},
@@ -550,7 +732,9 @@
 				lastLogIndex: -1,
 				lastLogDevID: "",
 				logs: [],
-				lastInjectTime: ""
+				httpExchanges: [],
+				lastInjectTime: "",
+				showHttpRequests: false
 			},
 			Plugin: {
 				loadUsingTag: false,
@@ -568,6 +752,9 @@
 			Testing: {
 				requests: sourceDocs.map(x=>{
 					x.parameters.forEach(y=>y.value = null);
+
+					if(sourceDocUrls[x.title])
+						x.docUrl = sourceDocUrls[x.title];
 					return x;
 				}),
 				lastResult: "",
@@ -603,7 +790,7 @@
 		  	};
 		  	setInterval(()=>{
 				try{
-					if(!this.Plugin.currentPlugin)
+					if(!this.Plugin.currentPlugin || !shouldDevLog)
 						return;
 
 					getDevLogs(this.Integration.lastLogIndex, (newLogs)=> {
@@ -631,6 +818,16 @@
 							});
 						}
 					});
+					if(this.Integration.showHttpRequests) {
+						getDevHttpExchanges((exchanges)=>{
+							Vue.nextTick(()=>{
+								for(i = 0; i < exchanges.length; i++) {
+									exchanges[i].response.show = false;
+									this.Integration.httpExchanges.unshift(exchanges[i]);
+								}
+							});
+						});
+					}
 				}
 				catch(ex) {
 					console.error("Failed update", ex);
@@ -638,7 +835,8 @@
 		  	}, 1000);
 		  	setInterval(()=>{
 		  		try{
-					this.isTestLoggedIn();
+		  			if(shouldLoginCheck)
+						this.isTestLoggedIn();
 				}catch(ex){}
 		  	}, 2500);
 		  },
@@ -670,6 +868,12 @@
 					this.Plugin.currentPluginUrl = url;
 					this.reloadPlugin();
 				});
+			},
+			deletePastPlugin(url) {
+				let currentPastPlugins = this.pastPluginUrls;
+				currentPastPlugins = currentPastPlugins.filter(x=>x.toLowerCase() != url.toLowerCase());
+				this.pastPluginUrls = currentPastPlugins;
+				localStorage.setItem("pastPlugins", JSON.stringify(currentPastPlugins));
 			},
 			loginTestPlugin() {
 				pluginLoginTestPlugin();
@@ -857,8 +1061,58 @@
 							"Error: " + ex;
 				}
 			},
+			testSourceRemotely(req) {
+				const name = req.title;
+				const parameterVals = req.parameters.map(x=>{
+					if(x.value && x.value.startsWith && x.value.startsWith("json:"))
+						return JSON.parse(x.value.substring(5));
+					return x.value
+				});
+
+				if(name == "enable") {
+					if(parameterVals.length > 0)
+						parameterVals[0] = this.Plugin.currentPlugin;
+					else
+						parameterVals.push(this.Plugin.currentPlugin);
+					if(parameterVals.length > 1)
+						parameterVals[1] = __DEV_SETTINGS;
+					else
+						parameterVals.push(__DEV_SETTINGS);
+				}
+
+				const func = source[name];
+				if(!func)
+					alert("Test func not found");
+
+				try {
+					const remoteResult = pluginRemoteTest(name, parameterVals);
+					console.log("Result for " + req.title, remoteResult);
+					this.Testing.lastResult = "//Results [" + name + "]\n" +
+						JSON.stringify(remoteResult, null, 3);
+					this.Testing.lastResultError = "";
+				}
+				catch(ex) {
+					if(ex.plugin_type == "CaptchaRequiredException") {
+						let shouldCaptcha = confirm("Do you want to request captcha?");
+						if(shouldCaptcha) {
+							pluginCaptchaTestPlugin(ex.url, ex.body);
+						}
+					}
+					console.error("Failed to run test for " + req.title, ex);
+					this.Testing.lastResult = ""
+					if(ex.message)
+						this.Testing.lastResultError = "//Results [" + name + "]\n\n" +
+							"Error: " + ex.message + "\n\n" + ex.stack;
+					else
+						this.Testing.lastResultError = "//Results [" + name + "]\n\n" +
+							"Error: " + ex;
+				}
+			},
 			showTestResults(results) {
 			
+			},
+			toggleHttpExchange(exchange) {
+				exchange.response.show = !exchange.response.show;
 			},
 			copyClipboard(cpy) {
 				if(navigator.clipboard)

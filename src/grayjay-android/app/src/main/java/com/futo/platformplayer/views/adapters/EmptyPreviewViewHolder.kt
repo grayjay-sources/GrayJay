@@ -2,7 +2,6 @@ package com.futo.platformplayer.views.adapters
 
 import android.view.View
 import android.view.ViewGroup
-import androidx.recyclerview.widget.RecyclerView.ViewHolder
 import com.futo.platformplayer.api.media.models.contents.IPlatformContent
 import com.futo.platformplayer.api.media.models.contents.IPlatformContentDetails
 
@@ -12,7 +11,7 @@ class EmptyPreviewViewHolder(viewGroup: ViewGroup) : ContentPreviewViewHolder(Vi
 
     override fun bind(content: IPlatformContent) {}
 
-    override fun preview(details: IPlatformContentDetails?, paused: Boolean) {}
+    override suspend fun preview(details: IPlatformContentDetails?, paused: Boolean) {}
 
     override fun stopPreview() {}
 

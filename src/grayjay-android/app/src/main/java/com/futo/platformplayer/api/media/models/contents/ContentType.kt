@@ -8,11 +8,14 @@ enum class ContentType(val value: Int) {
     POST(2),
     ARTICLE(3),
     PLAYLIST(4),
+    WEB(7),
 
     URL(9),
 
     NESTED_VIDEO(11),
+    CHANNEL(60),
 
+    LOCKED(70),
 
     PLACEHOLDER(90),
     DEFERRED(91);
@@ -20,7 +23,7 @@ enum class ContentType(val value: Int) {
     companion object {
         fun fromInt(value: Int): ContentType
         {
-            val result = ContentType.values().firstOrNull { it.value == value };
+            val result = ContentType.entries.firstOrNull { it.value == value };
             if(result == null)
                 throw UnknownPlatformException(value.toString());
             return result;

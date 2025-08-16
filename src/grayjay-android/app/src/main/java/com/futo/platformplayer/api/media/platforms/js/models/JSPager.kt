@@ -4,31 +4,35 @@ import android.os.Looper
 import com.caoccao.javet.values.reference.V8ValueArray
 import com.caoccao.javet.values.reference.V8ValueObject
 import com.futo.platformplayer.BuildConfig
+import com.futo.platformplayer.api.media.platforms.js.JSClient
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
 import com.futo.platformplayer.api.media.structures.IPager
 import com.futo.platformplayer.engine.V8Plugin
 import com.futo.platformplayer.getOrDefault
 import com.futo.platformplayer.getOrThrow
+import com.futo.platformplayer.invokeV8
 import com.futo.platformplayer.warnIfMainThread
 
 abstract class JSPager<T> : IPager<T> {
-    protected val plugin: V8Plugin;
+    protected val plugin: JSClient;
     protected val config: SourcePluginConfig;
     protected var pager: V8ValueObject;
 
     private var _lastResults: List<T>? = null;
-    private var _resultChanged: Boolean = true;
-    private var _hasMorePages: Boolean = false;
+    protected var _resultChanged: Boolean = true;
+    protected var _hasMorePages: Boolean = false;
     //private var _morePagesWasFalse: Boolean = false;
 
-    val isAvailable get() = plugin._runtime?.let { !it.isClosed && !it.isDead } ?: false;
+    val isAvailable get() = plugin.getUnderlyingPlugin()._runtime?.let { !it.isClosed && !it.isDead } ?: false;
 
-    constructor(config: SourcePluginConfig, plugin: V8Plugin, pager: V8ValueObject) {
+    constructor(config: SourcePluginConfig, plugin: JSClient, pager: V8ValueObject) {
         this.plugin = plugin;
         this.pager = pager;
         this.config = config;
 
-        _hasMorePages = pager.getOrDefault(config, "hasMore", "Pager", false) ?: false;
+        plugin.busy {
+            _hasMorePages = pager.getOrDefault(config, "hasMore", "Pager", false) ?: false;
+        }
         getResults();
     }
 
@@ -37,17 +41,20 @@ abstract class JSPager<T> : IPager<T> {
     }
 
     override fun hasMorePages(): Boolean {
-        return _hasMorePages;
+        return _hasMorePages && !pager.isClosed;
     }
 
     override fun nextPage() {
         warnIfMainThread("JSPager.nextPage");
 
-        pager = plugin.catchScriptErrors("[${plugin.config.name}] JSPager", "pager.nextPage()") {
-            pager.invoke("nextPage", arrayOf<Any>());
-        };
-        _hasMorePages = pager.getOrDefault(config, "hasMore", "Pager", false) ?: false;
-        _resultChanged = true;
+        val pluginV8 = plugin.getUnderlyingPlugin();
+        pluginV8.busy {
+            pager = pluginV8.catchScriptErrors("[${plugin.config.name}] JSPager", "pager.nextPage()") {
+                pager.invokeV8("nextPage", arrayOf<Any>());
+            };
+            _hasMorePages = pager.getOrDefault(config, "hasMore", "Pager", false) ?: false;
+            _resultChanged = true;
+        }
         /*
         try {
         }
@@ -59,8 +66,6 @@ abstract class JSPager<T> : IPager<T> {
     }
 
     override fun getResults(): List<T> {
-        warnIfMainThread("JSPager.getResults");
-
         val previousResults = _lastResults?.let {
             if(!_resultChanged)
                 return@let it;
@@ -70,13 +75,19 @@ abstract class JSPager<T> : IPager<T> {
         if(previousResults != null)
             return previousResults;
 
-        val items = pager.getOrThrow<V8ValueArray>(config, "results", "JSPager");
-        val newResults = items.toArray()
-            .map { convertResult(it as V8ValueObject) }
-            .toList();
-        _lastResults = newResults;
-        _resultChanged = false;
-        return newResults;
+        warnIfMainThread("JSPager.getResults");
+
+        return plugin.getUnderlyingPlugin().busy {
+            val items = pager.getOrThrow<V8ValueArray>(config, "results", "JSPager");
+            if (items.v8Runtime.isDead || items.v8Runtime.isClosed)
+                throw IllegalStateException("Runtime closed");
+            val newResults = items.toArray()
+                .map { convertResult(it as V8ValueObject) }
+                .toList();
+            _lastResults = newResults;
+            _resultChanged = false;
+            return@busy newResults;
+        }
     }
 
     abstract fun convertResult(obj: V8ValueObject): T;

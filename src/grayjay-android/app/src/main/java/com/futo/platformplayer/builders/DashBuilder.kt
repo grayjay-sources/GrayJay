@@ -88,7 +88,8 @@ class DashBuilder : XMLBuilder {
     fun withRepresentationOnDemand(id: String, subtitleSource: ISubtitleSource, subtitleUrl: String) {
         withRepresentation(id, mapOf(
             Pair("mimeType", subtitleSource.format ?: "text/vtt"),
-            Pair("startWithSAP", "1"),
+            Pair("default", "true"),
+            Pair("lang", "en"),
             Pair("bandwidth", "1000")
         )) {
             it.withBaseURL(subtitleUrl)
@@ -146,12 +147,12 @@ class DashBuilder : XMLBuilder {
                 dashBuilder.withAdaptationSet(
                     mapOf(
                         Pair("mimeType", subtitleSource.format ?: "text/vtt"),
-                        Pair("lang", "en"),
+                        Pair("lang", "df"),
                         Pair("default", "true")
                     )
                 ) {
                     //TODO: Verify if & really should be replaced like this?
-                    it.withRepresentationOnDemand("1", subtitleSource, subtitleUrl.replace("&", "&amp;"))
+                    it.withRepresentationOnDemand("caption_en", subtitleSource, subtitleUrl.replace("&", "&amp;"))
                 }
             }
             //Video
@@ -164,7 +165,7 @@ class DashBuilder : XMLBuilder {
                         Pair("subsegmentStartsWithSAP", "1")
                     )
                 ) {
-                    it.withRepresentationOnDemand("1", vidSource, vidUrl.replace("&", "&amp;"));
+                    it.withRepresentationOnDemand("2", vidSource, vidUrl.replace("&", "&amp;"));
                 }
             }
 

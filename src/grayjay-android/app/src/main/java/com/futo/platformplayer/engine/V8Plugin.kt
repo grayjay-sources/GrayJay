@@ -2,6 +2,7 @@ package com.futo.platformplayer.engine
 
 import android.content.Context
 import com.caoccao.javet.exceptions.JavetCompilationException
+import com.caoccao.javet.exceptions.JavetException
 import com.caoccao.javet.exceptions.JavetExecutionException
 import com.caoccao.javet.interop.V8Host
 import com.caoccao.javet.interop.V8Runtime
@@ -9,24 +10,67 @@ import com.caoccao.javet.values.V8Value
 import com.caoccao.javet.values.primitive.V8ValueBoolean
 import com.caoccao.javet.values.primitive.V8ValueInteger
 import com.caoccao.javet.values.primitive.V8ValueString
+import com.caoccao.javet.values.reference.IV8ValuePromise
 import com.caoccao.javet.values.reference.V8ValueObject
-import com.futo.platformplayer.*
+import com.caoccao.javet.values.reference.V8ValuePromise
 import com.futo.platformplayer.api.http.ManagedHttpClient
+import com.futo.platformplayer.api.media.platforms.js.internal.JSHttpClient
 import com.futo.platformplayer.constructs.Event1
-import com.futo.platformplayer.engine.exceptions.*
+import com.futo.platformplayer.engine.exceptions.NoInternetException
+import com.futo.platformplayer.engine.exceptions.PluginEngineStoppedException
+import com.futo.platformplayer.engine.exceptions.ScriptAgeException
+import com.futo.platformplayer.engine.exceptions.ScriptCaptchaRequiredException
+import com.futo.platformplayer.engine.exceptions.ScriptCompilationException
+import com.futo.platformplayer.engine.exceptions.ScriptCriticalException
+import com.futo.platformplayer.engine.exceptions.ScriptException
+import com.futo.platformplayer.engine.exceptions.ScriptExecutionException
+import com.futo.platformplayer.engine.exceptions.ScriptImplementationException
+import com.futo.platformplayer.engine.exceptions.ScriptLoginRequiredException
+import com.futo.platformplayer.engine.exceptions.ScriptReloadRequiredException
+import com.futo.platformplayer.engine.exceptions.ScriptTimeoutException
+import com.futo.platformplayer.engine.exceptions.ScriptUnavailableException
 import com.futo.platformplayer.engine.internal.V8Converter
-import com.futo.platformplayer.engine.packages.*
+import com.futo.platformplayer.engine.packages.PackageBridge
+import com.futo.platformplayer.engine.packages.PackageDOMParser
+import com.futo.platformplayer.engine.packages.PackageHttp
+import com.futo.platformplayer.engine.packages.PackageJSDOM
+import com.futo.platformplayer.engine.packages.PackageUtilities
+import com.futo.platformplayer.engine.packages.V8Package
+import com.futo.platformplayer.getOrThrow
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.states.StateAssets
+import com.futo.platformplayer.toList
+import com.futo.platformplayer.toV8ValueBlocking
+import com.futo.platformplayer.toV8ValueAsync
+import com.futo.platformplayer.warnIfMainThread
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class V8Plugin {
     val config: IV8PluginConfig;
     private val _client: ManagedHttpClient;
     private val _clientAuth: ManagedHttpClient;
+    private val _clientOthers: ConcurrentHashMap<String, JSHttpClient> = ConcurrentHashMap();
 
+    private val _promises = ConcurrentHashMap<V8ValuePromise, ((V8ValuePromise)->Unit)?>();
 
     val httpClient: ManagedHttpClient get() = _client;
     val httpClientAuth: ManagedHttpClient get() = _clientAuth;
+    val httpClientOthers: Map<String, JSHttpClient> get() = _clientOthers;
+
+    var runtimeId: Int = 0;
+
+    fun registerHttpClient(client: JSHttpClient) {
+        synchronized(_clientOthers) {
+            _clientOthers.put(client.clientId, client);
+        }
+    }
 
     private val _runtimeLock = Object();
     var _runtime : V8Runtime? = null;
@@ -38,10 +82,13 @@ class V8Plugin {
     var isStopped = true;
     val onStopped = Event1<V8Plugin>();
 
-    //TODO: Implement a more universal isBusy system for plugins + JSClient + pooling? TBD if propagation would be beneficial
-    private val _busyCounterLock = Object();
-    private var _busyCounter = 0;
-    val isBusy get() = synchronized(_busyCounterLock) { _busyCounter > 0 };
+    private val _busyLock = ReentrantLock()
+    val isBusy get() = _busyLock.isLocked;
+
+    var allowDevSubmit: Boolean = false
+        private set(value) {
+            field = value;
+        }
 
     /**
      * Called before a busy counter is about to be removed.
@@ -61,7 +108,15 @@ class V8Plugin {
         withDependency(PackageBridge(this, config));
 
         for(pack in config.packages)
-            withDependency(getPackage(context, pack));
+            withDependency(getPackage(pack)!!);
+        for(pack in config.packagesOptional)
+            getPackage(pack, true)?.let {
+                withDependency(it);
+            }
+    }
+
+    fun changeAllowDevSubmit(isAllowed: Boolean) {
+        allowDevSubmit = isAllowed;
     }
 
     fun withDependency(context: Context, assetPath: String) : V8Plugin  {
@@ -98,12 +153,16 @@ class V8Plugin {
         synchronized(_runtimeLock) {
             if (_runtime != null)
                 return;
-
+            runtimeId = runtimeId + 1;
+            //V8RuntimeOptions.V8_FLAGS.setUseStrict(true);
             val host = V8Host.getV8Instance();
             val options = host.jsRuntimeType.getRuntimeOptions();
+
             _runtime = host.createV8Runtime(options);
             if (!host.isIsolateCreated)
                 throw IllegalStateException("Isolate not created");
+
+            _runtimeMap.put(_runtime!!, this);
 
             //Setup bridge
             _runtime?.let {
@@ -141,80 +200,186 @@ class V8Plugin {
     }
     fun stop(){
         Logger.i(TAG, "Stopping plugin [${config.name}]");
-        isStopped = true;
-        whenNotBusy {
+        busy {
+            Logger.i(TAG, "Plugin stopping");
             synchronized(_runtimeLock) {
+                if(isStopped)
+                    return@busy;
                 isStopped = true;
+                runtimeId = runtimeId + 1;
+
+                //Cleanup http
+                for(pack in _depsPackages) {
+                    if(pack is PackageHttp) {
+                        pack.cleanup();
+                    }
+                }
+
                 _runtime?.let {
+                    _runtimeMap.remove(it);
                     _runtime = null;
-                    if(!it.isClosed && !it.isDead)
-                        it.close();
+                    if(!it.isClosed && !it.isDead) {
+                        try {
+                            it.close();
+                        }
+                        catch(ex: JavetException) {
+                            //In case race conditions are going on, already closed runtimes are fine.
+                            if(ex.message?.contains("Runtime is already closed") != true)
+                                throw ex;
+                        }
+                    }
                     Logger.i(TAG, "Stopped plugin [${config.name}]");
                 };
             }
+            Logger.i(TAG, "Plugin stopped");
             onStopped.emit(this);
         }
+        cancelAllPromises();
     }
 
+    fun isThreadAlreadyBusy(): Boolean {
+        return _busyLock.isHeldByCurrentThread;
+    }
+    fun <T> busy(handle: ()->T): T {
+        _busyLock.lock();
+        try {
+            return handle();
+        }
+        finally {
+            _busyLock.unlock();
+        }
+        /*
+        _busyLock.withLock {
+            //Logger.i(TAG, "Entered busy: " + Thread.currentThread().stackTrace.drop(3)?.firstOrNull()?.toString() + ", " + Thread.currentThread().stackTrace.drop(4)?.firstOrNull()?.toString());
+            return handle();
+        }*/
+    }
+    fun <T> unbusy(handle: ()->T): T {
+        val wasLocked = isThreadAlreadyBusy();
+        if(!wasLocked)
+            return handle();
+        val lockCount = _busyLock.holdCount;
+        for(i in 1..lockCount)
+            _busyLock.unlock();
+        try {
+            Logger.w(TAG, "Unlocking V8 thread for [${config.name}] for a blocking resolve of a promise")
+            return handle();
+        }
+        finally {
+            Logger.w(TAG, "Relocking V8 thread for [${config.name}] for a blocking resolve of a promise")
+
+            for(i in 1..lockCount)
+                _busyLock.lock();
+        }
+    }
     fun execute(js: String) : V8Value {
         return executeTyped<V8Value>(js);
+    }
+
+    suspend fun <T : V8Value> executeTypedAsync(js: String) : Deferred<T> {
+        warnIfMainThread("V8Plugin.executeTypedAsync");
+        if(isStopped)
+            throw PluginEngineStoppedException(config, "Instance is stopped", js);
+
+        return withContext(IO) {
+            return@withContext busy {
+                try {
+                    val runtime = _runtime ?: throw IllegalStateException("JSPlugin not started yet");
+                    val result = catchScriptErrors<V8Value>("Plugin[${config.name}]", js) {
+                        runtime.getExecutor(js).execute()
+                    };
+
+                    if (result is V8ValuePromise) {
+                        return@busy result.toV8ValueAsync<T>(this@V8Plugin);
+                    } else
+                        return@busy CompletableDeferred(result as T);
+                }
+                catch(ex: Throwable) {
+                    val def = CompletableDeferred<T>();
+                    def.completeExceptionally(ex);
+                    return@busy def;
+                }
+            }
+        }
     }
     fun <T : V8Value> executeTyped(js: String) : T {
         warnIfMainThread("V8Plugin.executeTyped");
         if(isStopped)
             throw PluginEngineStoppedException(config, "Instance is stopped", js);
 
-        synchronized(_busyCounterLock) {
-            _busyCounter++;
-        }
-
-        val runtime = _runtime ?: throw IllegalStateException("JSPlugin not started yet");
-        try {
-            return catchScriptErrors("Plugin[${config.name}]", js) {
+        val result = busy {
+            val runtime = _runtime ?: throw IllegalStateException("JSPlugin not started yet");
+            return@busy catchScriptErrors<V8Value>("Plugin[${config.name}]", js) {
                 runtime.getExecutor(js).execute()
             };
+        };
+        if(result is V8ValuePromise) {
+            return result.toV8ValueBlocking(this@V8Plugin);
         }
-        finally {
-            synchronized(_busyCounterLock) {
-                //Free busy *after* afterBusy calls are done to prevent calls on dead runtimes
-                try {
-                    afterBusy.emit(_busyCounter - 1);
-                }
-                catch(ex: Throwable) {
-                    Logger.e(TAG, "Unhandled V8Plugin.afterBusy", ex);
-                }
-                _busyCounter--;
+        return result as T;
+    }
+    fun executeBoolean(js: String) : Boolean? = busy { catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueBoolean>(js).value } }
+    fun executeString(js: String) : String? = busy { catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueString>(js).value } }
+    fun executeInteger(js: String) : Int? = busy { catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueInteger>(js).value } }
+
+
+    fun <T: V8Value> handlePromise(result: V8ValuePromise): CompletableDeferred<T> {
+        val def = CompletableDeferred<T>();
+        result.register(object: IV8ValuePromise.IListener {
+            override fun onFulfilled(p0: V8Value?) {
+                resolvePromise(result);
+                def.complete(p0 as T);
             }
+            override fun onRejected(p0: V8Value?) {
+                resolvePromise(result);
+                def.completeExceptionally(NotImplementedError("onRejected promise not implemented.."));
+            }
+            override fun onCatch(p0: V8Value?) {
+                resolvePromise(result);
+                def.completeExceptionally(NotImplementedError("onCatch promise not implemented.."));
+            }
+        });
+        registerPromise(result) {
+            if(def.isActive)
+                def.cancel("Cancelled by system");
+        }
+        return def;
+    }
+    fun registerPromise(promise: V8ValuePromise, onCancelled: ((V8ValuePromise)->Unit)? = null) {
+        Logger.v(TAG, "Promise registered for plugin [${config.name}]: ${promise.hashCode()}");
+        if (onCancelled != null) {
+            _promises.put(promise, onCancelled)
+        };
+    }
+    fun resolvePromise(promise: V8ValuePromise, cancelled: Boolean = false) {
+        Logger.v(TAG, "Promise resolved for plugin [${config.name}]: ${promise.hashCode()}");
+        val found = synchronized(_promises) {
+            val found = _promises.getOrDefault(promise, null);
+            _promises.remove(promise);
+            return@synchronized found;
+        };
+        if(found != null && cancelled)
+            found(promise);
+    }
+    fun cancelAllPromises(){
+        val promises = _promises.keys().toList();
+        for(key in promises) {
+            try {
+                resolvePromise(key, true);
+            }
+            catch(ex: Throwable) {}
         }
     }
-    fun executeBoolean(js: String) : Boolean? = catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueBoolean>(js).value };
-    fun executeString(js: String) : String? = catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueString>(js).value };
-    fun executeInteger(js: String) : Int? = catchScriptErrors("Plugin[${config.name}]") { executeTyped<V8ValueInteger>(js).value };
 
-    fun whenNotBusy(handler: (V8Plugin)->Unit) {
-        synchronized(_busyCounterLock) {
-            if(_busyCounter == 0)
-                handler(this);
-            else {
-                val tag = Object();
-                afterBusy.subscribe(tag) {
-                    if(it == 0) {
-                        Logger.w(TAG, "V8Plugin afterBusy handled");
-                        afterBusy.remove(tag);
-                        handler(this);
-                    }
-                }
-            }
-        }
-    }
 
-    private fun getPackage(context: Context, packageName: String): V8Package {
+    private fun getPackage(packageName: String, allowNull: Boolean = false): V8Package? {
         //TODO: Auto get all package types?
         return when(packageName) {
-            "DOMParser" -> PackageDOMParser(context, this)
+            "DOMParser" -> PackageDOMParser(this)
             "Http" -> PackageHttp(this, config)
             "Utilities" -> PackageUtilities(this, config)
-            else -> throw ScriptCompilationException(config, "Unknown package [${packageName}] required for plugin ${config.name}");
+            "JSDOM" -> PackageJSDOM(this, config)
+            else -> if(allowNull) null else throw ScriptCompilationException(config, "Unknown package [${packageName}] required for plugin ${config.name}");
         };
     }
 
@@ -232,7 +397,13 @@ class V8Plugin {
         private val REGEX_EX_FALLBACK = Regex(".*throw.*?[\"](.*)[\"].*");
         private val REGEX_EX_FALLBACK2 = Regex(".*throw.*?['](.*)['].*");
 
+        private val _runtimeMap = ConcurrentHashMap<V8Runtime, V8Plugin>();
+
         val TAG = "V8Plugin";
+
+        fun getPluginFromRuntime(runtime: V8Runtime): V8Plugin? {
+            return _runtimeMap.getOrDefault(runtime, null);
+        }
 
         fun <T: Any?> catchScriptErrors(config: IV8PluginConfig, context: String, code: String? = null, handle: ()->T): T {
             var codeStripped = code;
@@ -253,7 +424,7 @@ class V8Plugin {
                         throwExceptionFromV8(
                             config,
                             result.getOrThrow(config, "plugin_type", "V8Plugin"),
-                            result.getOrThrow(config, "message", "V8Plugin"),
+                            context + ":" + result.getOrThrow(config, "message", "V8Plugin"),
                             null,
                             null,
                             codeStripped
@@ -264,17 +435,26 @@ class V8Plugin {
                 return result;
             }
             catch(scriptEx: JavetCompilationException) {
-                throw ScriptCompilationException(config, "Compilation: ${scriptEx.message}\n(${scriptEx.scriptingError.lineNumber})[${scriptEx.scriptingError.startColumn}-${scriptEx.scriptingError.endColumn}]: ${scriptEx.scriptingError.sourceLine}", null, codeStripped);
+                throw ScriptCompilationException(config, "Compilation: [${context}]: ${scriptEx.message}\n(${scriptEx.scriptingError.lineNumber})[${scriptEx.scriptingError.startColumn}-${scriptEx.scriptingError.endColumn}]: ${scriptEx.scriptingError.sourceLine}", null, codeStripped);
             }
             catch(executeEx: JavetExecutionException) {
-                if(executeEx.scriptingError?.context?.containsKey("plugin_type") == true) {
-                    val pluginType = executeEx.scriptingError.context["plugin_type"].toString();
+                val obj = executeEx.scriptingError?.context
+                if(obj != null && obj.containsKey("plugin_type") == true) {
+                    val pluginType = obj["plugin_type"].toString();
 
                     //Captcha
                     if (pluginType == "CaptchaRequiredException") {
                         throw ScriptCaptchaRequiredException(config,
-                            executeEx.scriptingError.context["url"]?.toString(),
-                            executeEx.scriptingError.context["body"]?.toString(),
+                            obj["url"]?.toString(),
+                            obj["body"]?.toString(),
+                            executeEx, executeEx.scriptingError?.stack, codeStripped);
+                    }
+
+                    //Reload Required
+                    if (pluginType == "ReloadRequiredException") {
+                        throw ScriptReloadRequiredException(config,
+                            obj["msg"]?.toString(),
+                            obj["reloadData"]?.toString(),
                             executeEx, executeEx.scriptingError?.stack, codeStripped);
                     }
 
@@ -288,6 +468,41 @@ class V8Plugin {
                         codeStripped
                     );
                 }
+                /* //Required for newer V8 versions
+                if(executeEx.scriptingError?.context is IJavetEntityError) {
+                    val obj = executeEx.scriptingError?.context as IJavetEntityError
+                    if(obj.context.containsKey("plugin_type") == true) {
+                        val pluginType = obj.context["plugin_type"].toString();
+
+                        //Captcha
+                        if (pluginType == "CaptchaRequiredException") {
+                            throw ScriptCaptchaRequiredException(config,
+                                obj.context["url"]?.toString(),
+                                obj.context["body"]?.toString(),
+                                executeEx, executeEx.scriptingError?.stack, codeStripped);
+                        }
+
+                        //Reload Required
+                        if (pluginType == "ReloadRequiredException") {
+                            throw ScriptReloadRequiredException(config,
+                                obj.context["msg"]?.toString(),
+                                obj.context["reloadData"]?.toString(),
+                                executeEx, executeEx.scriptingError?.stack, codeStripped);
+                        }
+
+                        //Others
+                        throwExceptionFromV8(
+                            config,
+                            pluginType,
+                            (extractJSExceptionMessage(executeEx) ?: ""),
+                            executeEx,
+                            executeEx.scriptingError?.stack,
+                            codeStripped
+                        );
+                    }
+
+                }
+                */
                 throw ScriptExecutionException(config, extractJSExceptionMessage(executeEx) ?: "", null, executeEx.scriptingError?.stack, codeStripped);
             }
             catch(ex: Exception) {
@@ -301,6 +516,7 @@ class V8Plugin {
                 "CriticalException" -> throw ScriptCriticalException(config, msg, innerEx, stack, code);
                 "AgeException" -> throw ScriptAgeException(config, msg, innerEx, stack, code);
                 "UnavailableException" -> throw ScriptUnavailableException(config, msg, innerEx, stack, code);
+                "ScriptLoginRequiredException" -> throw ScriptLoginRequiredException(config, msg, innerEx, stack, code);
                 "ScriptExecutionException" -> throw ScriptExecutionException(config, msg, innerEx, stack, code);
                 "ScriptCompilationException" -> throw ScriptCompilationException(config, msg, innerEx, code);
                 "ScriptImplementationException" -> throw ScriptImplementationException(config, msg, innerEx, null, code);
@@ -337,9 +553,4 @@ class V8Plugin {
             return StateAssets.readAsset(context, path) ?: throw java.lang.IllegalStateException("script ${path} not found");
         }
     }
-
-
-    /**
-     * Methods available for scripts (bridge object)
-     */
 }

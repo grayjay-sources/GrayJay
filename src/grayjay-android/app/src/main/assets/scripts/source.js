@@ -10,7 +10,9 @@ let Type = {
         Videos: "VIDEOS",
         Streams: "STREAMS",
         Mixed: "MIXED",
-        Live: "LIVE"
+        Live: "LIVE",
+        Subscriptions: "SUBSCRIPTIONS",
+        Shorts: "SHORTS"
     },
     Order: {
         Chronological: "CHRONOLOGICAL"
@@ -30,30 +32,33 @@ let Type = {
     Text: {
         RAW: 0,
         HTML: 1,
-        MARKUP: 2
+        MARKUP: 2,
+        CODE: 3
     },
     Chapter: {
         NORMAL: 0,
 
         SKIPPABLE: 5,
-        SKIP: 6
+        SKIP: 6,
+        SKIPONCE: 7
     }
 };
 
 let Language = {
     UNKNOWN: "Unknown",
-    ARABIC: "Arabic",
-    SPANISH: "Spanish",
-    FRENCH: "French",
-    HINDI: "Hindi",
-    INDONESIAN: "Indonesian",
-    KOREAN: "Korean",
-    PORTBRAZIL: "Portuguese Brazilian",
-    RUSSIAN: "Russian",
-    THAI: "Thai",
-    TURKISH: "Turkish",
-    VIETNAMESE: "Vietnamese",
-    ENGLISH: "English"
+    ARABIC: "ar",
+    SPANISH: "es",
+    FRENCH: "fr",
+    HINDI: "hi",
+    INDONESIAN: "id",
+    KOREAN: "ko",
+    PORTUGUESE: "pt",
+    PORTBRAZIL: "pt",
+    RUSSIAN: "ru",
+    THAI: "th",
+    TURKISH: "tr",
+    VIETNAMESE: "vi",
+    ENGLISH: "en"
 }
 
 class ScriptException extends Error {
@@ -68,6 +73,16 @@ class ScriptException extends Error {
             this.plugin_type = type ?? ""; //string
             this.msg = msg ?? ""; //string
         }
+    }
+}
+class ScriptLoginRequiredException extends ScriptException {
+    constructor(msg) {
+        super("ScriptLoginRequiredException", msg);
+    }
+}
+class LoginRequiredException extends ScriptException {
+    constructor(msg) {
+        super("ScriptLoginRequiredException", msg);
     }
 }
 class CaptchaRequiredException extends Error {
@@ -86,6 +101,12 @@ class CriticalException extends ScriptException {
 class UnavailableException extends ScriptException {
     constructor(msg) {
         super("UnavailableException", msg);
+    }
+}
+class ReloadRequiredException extends ScriptException {
+    constructor(msg, reloadData) {
+        super("ReloadRequiredException", msg);
+        this.reloadData = reloadData;
     }
 }
 class AgeException extends ScriptException {
@@ -159,13 +180,27 @@ class FilterCapability {
 
 
 class PlatformAuthorLink {
-    constructor(id, name, url, thumbnail, subscribers) {
+    constructor(id, name, url, thumbnail, subscribers, membershipUrl) {
         this.id = id ?? PlatformID(); //PlatformID
         this.name = name ?? ""; //string
         this.url = url ?? ""; //string
         this.thumbnail = thumbnail; //string
         if(subscribers)
             this.subscribers = subscribers;
+        if(membershipUrl)
+            this.membershipUrl = membershipUrl ?? null; //string (for backcompat)
+    }
+}
+class PlatformAuthorMembershipLink {
+    constructor(id, name, url, thumbnail, subscribers, membershipUrl) {
+        this.id = id ?? PlatformID(); //PlatformID
+        this.name = name ?? ""; //string
+        this.url = url ?? ""; //string
+        this.thumbnail = thumbnail; //string
+        if(subscribers)
+            this.subscribers = subscribers;
+        if(membershipUrl)
+            this.membershipUrl = membershipUrl ?? null; //string
     }
 }
 class PlatformContent {
@@ -174,7 +209,7 @@ class PlatformContent {
         obj = obj ?? {};
         this.id = obj.id ?? PlatformID();   //PlatformID
         this.name = obj.name ?? ""; //string
-        this.thumbnails = obj.thumbnails; //Thumbnail[]
+        this.thumbnails = obj.thumbnails ?? new Thumbnails([]); //Thumbnail[]
         this.author = obj.author; //PlatformAuthorLink
         this.datetime = obj.datetime ?? obj.uploadDate ?? 0; //OffsetDateTime (Long)
         this.url = obj.url ?? ""; //String
@@ -196,6 +231,16 @@ class PlatformNestedMediaContent extends PlatformContent {
         this.contentThumbnails = obj.contentThumbnails ?? new Thumbnails();
     }
 }
+class PlatformLockedContent extends PlatformContent {
+    constructor(obj) {
+        super(obj, 70);
+        obj = obj ?? {};
+        this.contentName = obj.contentName;
+        this.contentThumbnails = obj.contentThumbnails ?? new Thumbnails();
+        this.unlockUrl = obj.unlockUrl ?? "";
+        this.lockDescription = obj.lockDescription;
+    }
+}
 class PlatformVideo extends PlatformContent {
     constructor(obj) {
         super(obj, 1);
@@ -206,7 +251,11 @@ class PlatformVideo extends PlatformContent {
         this.duration = obj.duration ?? -1; //Long
         this.viewCount = obj.viewCount ?? -1; //Long
 
+        this.playbackTime = obj.playbackTime ?? -1;
+        this.playbackDate = obj.playbackDate ?? undefined;
+
         this.isLive = obj.isLive ?? false; //Boolean
+        this.isShort = !!obj.isShort ?? false;
     }
 }
 class PlatformVideoDetails extends PlatformVideo {
@@ -217,12 +266,17 @@ class PlatformVideoDetails extends PlatformVideo {
 
         this.description = obj.description ?? "";//String
         this.video = obj.video ?? {}; //VideoSourceDescriptor
-        this.dash = obj.dash ?? null; //DashSource
-        this.hls = obj.hls ?? null; //HLSSource
+        this.dash = obj.dash ?? null; //DashSource, deprecated
+        this.hls = obj.hls ?? null; //HLSSource, deprecated
         this.live = obj.live ?? null; //VideoSource
 
         this.rating = obj.rating ?? null; //IRating
         this.subtitles = obj.subtitles ?? [];
+        this.isShort = !!obj.isShort ?? false;
+
+        if (obj.getContentRecommendations) {
+            this.getContentRecommendations = obj.getContentRecommendations
+        }
     }
 }
 
@@ -241,11 +295,80 @@ class PlatformPostDetails extends PlatformPost {
         super(obj);
         obj = obj ?? {};
         this.plugin_type = "PlatformPostDetails";
-        this.rating = obj.rating ?? RatingLikes(-1);
+        this.rating = obj.rating ?? new RatingLikes(-1);
         this.textType = obj.textType ?? 0;
         this.content = obj.content ?? "";
     }
 }
+
+class PlatformWeb extends PlatformContent {
+    constructor(obj) {
+        super(obj, 7);
+        obj = obj ?? {};
+        this.plugin_type = "PlatformWeb";
+    }
+}
+class PlatformWebDetails extends PlatformWeb {
+    constructor(obj) {
+        super(obj, 7);
+        obj = obj ?? {};
+        this.plugin_type = "PlatformWebDetails";
+        this.html = obj.html;
+    }
+}
+
+class PlatformArticle extends PlatformContent {
+    constructor(obj) {
+        super(obj, 3);
+        obj = obj ?? {};
+        this.plugin_type = "PlatformArticle";
+        this.rating = obj.rating ?? new RatingLikes(-1);
+        this.summary = obj.summary ?? "";
+        this.thumbnails = obj.thumbnails ?? new Thumbnails([]);
+    }
+}
+class PlatformArticleDetails extends PlatformArticle {
+    constructor(obj) {
+        super(obj, 3);
+        obj = obj ?? {};
+        this.plugin_type = "PlatformArticleDetails";
+        this.rating = obj.rating ?? new RatingLikes(-1);
+        this.segments = obj.segments ?? [];
+    }
+}
+class ArticleSegment {
+    constructor(type) {
+        this.type = type;
+    }
+}
+class ArticleTextSegment extends ArticleSegment {
+    constructor(content, textType) {
+        super(1);
+        this.textType = textType;
+        this.content = content;
+    }
+}
+class ArticleImagesSegment extends ArticleSegment {
+    constructor(images, caption) {
+        super(2);
+        this.images = images;
+        this.caption = caption;
+    }
+}
+class ArticleHeaderSegment extends ArticleSegment {
+    constructor(content, level) {
+        super(3);
+        this.level = level;
+        this.content = content;
+    }
+}
+class ArticleNestedSegment extends ArticleSegment {
+    constructor(nested) {
+        super(9);
+        this.nested = nested;
+    }
+}
+
 
 //Sources
 class VideoSourceDescriptor {
@@ -289,6 +412,18 @@ class VideoUrlSource {
         this.bitrate = obj.bitrate ?? 0;
         this.duration = obj.duration ?? 0;
         this.url = obj.url;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
+    }
+}
+class VideoUrlWidevineSource extends VideoUrlSource {
+    constructor(obj) {
+        super(obj);
+        this.plugin_type = "VideoUrlWidevineSource";
+
+        this.licenseUri = obj.licenseUri;
+        if(obj.getLicenseRequestExecutor)
+            this.getLicenseRequestExecutor = obj.getLicenseRequestExecutor;
     }
 }
 class VideoUrlRangeSource extends VideoUrlSource {
@@ -314,6 +449,41 @@ class AudioUrlSource {
         this.duration = obj.duration ?? 0;
         this.url = obj.url;
         this.language = obj.language ?? Language.UNKNOWN;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
+    }
+}
+class AudioUrlWidevineSource extends AudioUrlSource {
+    constructor(obj) {
+        super(obj);
+        this.plugin_type = "AudioUrlWidevineSource";
+
+        this.licenseUri = obj.licenseUri;
+        if(obj.getLicenseRequestExecutor)
+            this.getLicenseRequestExecutor = obj.getLicenseRequestExecutor;
+
+        // deprecated api conversion
+        if(obj.bearerToken) {
+            this.getLicenseRequestExecutor = () => {
+                return {
+                    executeRequest: (url, _headers, _method, license_request_data) => {
+                        const response = http.POST(
+                           url,
+                           license_request_data,
+                           { Authorization: `Bearer ${obj.bearerToken}` },
+                           false,
+                           true
+                       );
+
+                       if (!response.body) {
+                           throw new ScriptException("Unable to acquire license key");
+                       }
+
+                       return response.body;
+                   }
+                }
+            }
+        }
     }
 }
 class AudioUrlRangeSource extends AudioUrlSource {
@@ -339,6 +509,8 @@ class HLSSource {
         this.priority = obj.priority ?? false;
         if(obj.language)
             this.language = obj.language;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
     }
 }
 class DashSource {
@@ -350,13 +522,58 @@ class DashSource {
         this.url = obj.url;
         if(obj.language)
             this.language = obj.language;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
     }
 }
+class DashWidevineSource extends DashSource {
+    constructor(obj) {
+        super(obj);
+        this.plugin_type = "DashWidevineSource";
+
+        this.licenseUri = obj.licenseUri;
+        if(obj.getLicenseRequestExecutor)
+            this.getLicenseRequestExecutor = obj.getLicenseRequestExecutor;
+    }
+}
+class DashManifestRawSource {
+    constructor(obj) {
+        obj = obj ?? {};
+        this.plugin_type = "DashRawSource";
+        this.name = obj.name ?? "";
+        this.bitrate = obj.bitrate ?? 0;
+        this.container = obj.container ?? "";
+        this.codec = obj.codec ?? "";
+        this.duration = obj.duration ?? 0;
+        this.url = obj.url;
+        this.language = obj.language ?? Language.UNKNOWN;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
+    }
+}
+
+class DashManifestRawAudioSource {
+    constructor(obj) {
+        obj = obj ?? {};
+        this.plugin_type = "DashRawAudioSource";
+        this.name = obj.name ?? "";
+        this.bitrate = obj.bitrate ?? 0;
+        this.container = obj.container ?? "";
+        this.codec = obj.codec ?? "";
+        this.duration = obj.duration ?? 0;
+        this.url = obj.url;
+        this.language = obj.language ?? Language.UNKNOWN;
+        this.manifest = obj.manifest ?? null;
+        if(obj.requestModifier)
+            this.requestModifier = obj.requestModifier;
+    }
+}
+
 
 class RequestModifier {
     constructor(obj) {
         obj = obj ?? {};
-        this.allowByteSkip = obj.allowByteSkip;
+        this.allowByteSkip = obj.allowByteSkip; //Kinda deprecated.. wip
     }
 }
 
@@ -382,7 +599,7 @@ class PlatformPlaylist extends PlatformContent {
     constructor(obj) {
         super(obj, 4);
         this.plugin_type = "PlatformPlaylist";
-        this.videoCount = obj.videoCount ?? 0;
+        this.videoCount = obj.videoCount ?? -1;
         this.thumbnail = obj.thumbnail;
     }
 }
@@ -426,6 +643,8 @@ class PlatformComment {
         this.date = obj.date ?? 0;
         this.replyCount = obj.replyCount ?? 0;
         this.context = obj.context ?? {};
+        if(obj.getReplies)
+            this.getReplies = obj.getReplies;
     }
 }
 
@@ -497,11 +716,12 @@ class LiveEventViewCount extends LiveEvent {
     }
 }
 class LiveEventRaid extends LiveEvent {
-    constructor(targetUrl, targetName, targetThumbnail) {
+    constructor(targetUrl, targetName, targetThumbnail, isOutgoing) {
         super(100);
         this.targetUrl = targetUrl;
         this.targetName = targetName;
         this.targetThumbnail = targetThumbnail;
+        this.isOutgoing = isOutgoing ?? true;
     }
 }
 
@@ -574,6 +794,7 @@ let plugin = {
 //To override by plugin
 const source = {
     getHome() { return new ContentPager([], false, {}); },
+    getShorts() { return new VideoPager([], false, {}); },
 
     enable(config){  },
     disable() {},
@@ -708,3 +929,99 @@ class URLSearchParams {
         return searchString;
     }
 }
+
+
+var __REGEX_SPACE_CHARACTERS = /<%= spaceCharacters %>/g;
+var __btoa_TABLE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function btoa(input) {
+	input = String(input);
+	if (/[^\0-\xFF]/.test(input)) {
+		// Note: no need to special-case astral symbols here, as surrogates are
+		// matched, and the input is supposed to only contain ASCII anyway.
+		error(
+			'The string to be encoded contains characters outside of the ' +
+			'Latin1 range.'
+		);
+	}
+	var padding = input.length % 3;
+	var output = '';
+	var position = -1;
+	var a;
+	var b;
+	var c;
+	var buffer;
+	// Make sure any padding is handled outside of the loop.
+	var length = input.length - padding;
+
+	while (++position < length) {
+		// Read three bytes, i.e. 24 bits.
+		a = input.charCodeAt(position) << 16;
+		b = input.charCodeAt(++position) << 8;
+		c = input.charCodeAt(++position);
+		buffer = a + b + c;
+		// Turn the 24 bits into four chunks of 6 bits each, and append the
+		// matching character for each of them to the output.
+		output += (
+			__btoa_TABLE.charAt(buffer >> 18 & 0x3F) +
+			__btoa_TABLE.charAt(buffer >> 12 & 0x3F) +
+			__btoa_TABLE.charAt(buffer >> 6 & 0x3F) +
+			__btoa_TABLE.charAt(buffer & 0x3F)
+		);
+	}
+
+	if (padding == 2) {
+		a = input.charCodeAt(position) << 8;
+		b = input.charCodeAt(++position);
+		buffer = a + b;
+		output += (
+			__btoa_TABLE.charAt(buffer >> 10) +
+			__btoa_TABLE.charAt((buffer >> 4) & 0x3F) +
+			__btoa_TABLE.charAt((buffer << 2) & 0x3F) +
+			'='
+		);
+	} else if (padding == 1) {
+		buffer = input.charCodeAt(position);
+		output += (
+			__btoa_TABLE.charAt(buffer >> 2) +
+			__btoa_TABLE.charAt((buffer << 4) & 0x3F) +
+			'=='
+		);
+	}
+
+	return output;
+};
+function atob(input) {
+	input = String(input)
+		.replace(__REGEX_SPACE_CHARACTERS, '');
+	var length = input.length;
+	if (length % 4 == 0) {
+		input = input.replace(/==?$/, '');
+		length = input.length;
+	}
+	if (
+		length % 4 == 1 ||
+		// http://whatwg.org/C#alphanumeric-ascii-characters
+		/[^+a-zA-Z0-9/]/.test(input)
+	) {
+		error(
+			'Invalid character: the string to be decoded is not correctly encoded.'
+		);
+	}
+	var bitCounter = 0;
+	var bitStorage;
+	var buffer;
+	var output = '';
+	var position = -1;
+	while (++position < length) {
+		buffer = __btoa_TABLE.indexOf(input.charAt(position));
+		bitStorage = bitCounter % 4 ? bitStorage * 64 + buffer : buffer;
+		// Unless this is the first of a group of 4 characters…
+		if (bitCounter++ % 4) {
+			// …convert the first 8 bits to a single ASCII character.
+			output += String.fromCharCode(
+				0xFF & bitStorage >> (-2 * bitCounter & 6)
+			);
+		}
+	}
+	return output;
+};

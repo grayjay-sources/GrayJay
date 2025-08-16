@@ -6,6 +6,18 @@
     android:orientation="horizontal"
     android:gravity="center_vertical">
 
+
+    <ImageButton
+        android:id="@+id/app_icon"
+        android:layout_width="35dp"
+        android:layout_height="35dp"
+        android:contentDescription="@string/cd_app_icon"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="4dp"
+        android:scaleType="fitCenter"
+        app:srcCompat="@drawable/foreground" />
+
+    <!--
     <ImageButton
         android:layout_width="35dp"
         android:layout_height="35dp"
@@ -13,13 +25,19 @@
         android:layout_marginEnd="4dp"
         android:scaleType="fitCenter"
         app:srcCompat="@drawable/ic_construction" />
+    -->
 
-    <!--<ImageButton
+    <TextView
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
-        android:paddingRight="12dp"
-        android:scaleType="fitCenter"
-        app:srcCompat="@drawable/ic_futo_logo_text" />-->
+        android:textSize="22dp"
+        android:layout_marginTop="-2dp"
+        android:fontFamily="@font/inter_light"
+        android:text="Grayjay"
+        android:textColor="@color/white"
+        android:gravity="center_vertical"
+        android:layout_marginStart="8dp"/>
+    <!--
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
@@ -42,6 +60,8 @@
             android:textColor="@color/white"
             android:layout_marginTop="-8dp"/>
     </LinearLayout>
+    -->
+
 
     <Space
         android:layout_width="0dp"
@@ -53,6 +73,7 @@
         android:id="@+id/button_cast"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
+        android:contentDescription="@string/cd_cast_button"
         android:paddingStart="16dp"
         android:paddingEnd="12dp"
         android:paddingTop="12dp"
@@ -65,6 +86,7 @@
         android:id="@+id/button_add"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
+        android:contentDescription="@string/cd_button_add"
         android:paddingStart="5dp"
         android:paddingEnd="12dp"
         android:paddingTop="7dp"

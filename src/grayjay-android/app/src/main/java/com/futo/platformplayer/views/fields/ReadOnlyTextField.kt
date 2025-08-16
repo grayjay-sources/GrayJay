@@ -2,9 +2,10 @@ package com.futo.platformplayer.views.fields
 
 import android.content.Context
 import android.util.AttributeSet
-import android.widget.*
+import android.widget.TableRow
+import android.widget.TextView
 import com.futo.platformplayer.R
-import com.futo.platformplayer.constructs.Event2
+import com.futo.platformplayer.constructs.Event3
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 
@@ -27,31 +28,42 @@ class ReadOnlyTextField : TableRow, IField {
     private val _title : TextView;
     private val _value : TextView;
 
-    override val onChanged = Event2<IField, Any>();
+    override val onChanged = Event3<IField, Any, Any>();
 
     override var reference: Any? = null;
+    override var isAdvanced: Boolean = false;
+
+    override val value: Any? = null;
+
+    override val searchContent: String
+        get() = "${_title.text}";
+
     constructor(context : Context, attrs : AttributeSet? = null) : super(context, attrs){
         inflate(context, R.layout.field_readonly_text, this);
         _title = findViewById(R.id.field_title);
         _value = findViewById(R.id.field_value);
     }
 
-    override fun fromField(obj : Any, field : Field, formField: FormField?) : ReadOnlyTextField {
+    override fun setValue(value: Any) {}
+
+    override fun fromField(obj : Any, field : Field, formField: FormField?, advanced: Boolean) : ReadOnlyTextField {
         this._field = field;
         this._obj = obj;
 
         val attrField = formField ?: field.getAnnotation(FormField::class.java);
-        if(attrField != null) {
+        if (attrField != null) {
             _title.text = context.getString(attrField.title);
             descriptor = attrField;
-        }
-        else
+        } else {
             _title.text = field.name;
+        }
 
-        if(field.type == String::class.java)
+        if (field.type == String::class.java) {
             _value.text = field.get(obj) as String;
-        else
-            _value.text = field.get(obj).toString();
+        } else {
+            _value.text = field.get(obj)?.toString() ?: "";
+        }
+
         return this;
     }
     fun fromProp(obj : Any, field : Method, formField: FormField?) : ReadOnlyTextField {
@@ -59,17 +71,19 @@ class ReadOnlyTextField : TableRow, IField {
         this._obj = obj;
 
         val attrField = formField ?: field.getAnnotation(FormField::class.java);
-        if(attrField != null) {
+        if (attrField != null) {
             _title.text = context.getString(attrField.title);
             descriptor = attrField;
-        }
-        else
+        } else {
             _title.text = field.name;
+        }
 
-        if(field.returnType == String::class.java)
+        if (field.returnType == String::class.java) {
             _value.text = field.invoke(obj) as String;
-        else
+        } else {
             _value.text = field.invoke(obj)?.toString() ?: "";
+        }
+
         return this;
     }
     override fun setField() {

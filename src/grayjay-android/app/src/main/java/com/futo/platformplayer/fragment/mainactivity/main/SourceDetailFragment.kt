@@ -12,8 +12,11 @@ import android.webkit.CookieManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
-import com.futo.platformplayer.*
+import com.futo.platformplayer.R
+import com.futo.platformplayer.Settings
+import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.activities.AddSourceActivity
 import com.futo.platformplayer.activities.LoginActivity
 import com.futo.platformplayer.api.http.ManagedHttpClient
@@ -21,12 +24,14 @@ import com.futo.platformplayer.api.media.platforms.js.JSClient
 import com.futo.platformplayer.api.media.platforms.js.SourcePluginConfig
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.states.StateDeveloper
+import com.futo.platformplayer.states.StateHistory
 import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.states.StatePlugins
 import com.futo.platformplayer.views.buttons.BigButton
 import com.futo.platformplayer.views.buttons.BigButtonGroup
-import com.futo.platformplayer.views.sources.SourceHeaderView
 import com.futo.platformplayer.views.fields.FieldForm
+import com.futo.platformplayer.views.sources.SourceHeaderView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,7 +45,7 @@ class SourceDetailFragment : MainFragment() {
 
     override fun onShownWithView(parameter: Any?, isBack: Boolean) {
         super.onShownWithView(parameter, isBack);
-        _view?.onShown(parameter, isBack);
+        _view?.onShown(parameter);
     }
 
     override fun onHide() {
@@ -92,10 +97,15 @@ class SourceDetailFragment : MainFragment() {
             updateSourceViews();
         }
 
-        fun onShown(parameter: Any?, isBack: Boolean) {
+        fun onShown(parameter: Any?) {
             if (parameter is SourcePluginConfig) {
                 loadConfig(parameter);
                 updateSourceViews();
+            }
+            else if(parameter is UpdatePluginAction) {
+                loadConfig(parameter.config);
+                updateSourceViews();
+                checkForUpdatesSource();
             }
 
             setLoading(false);
@@ -104,17 +114,20 @@ class SourceDetailFragment : MainFragment() {
         fun onHide() {
             val id = _config?.id ?: return;
 
-            if(_settingsChanged && _settings != null) {
-                _settingsChanged = false;
-                StatePlugins.instance.setPluginSettings(id, _settings!!);
-                reloadSource(id);
-
-                UIDialogs.toast(context.getString(R.string.plugin_settings_saved), false);
-            }
+            var shouldReload = false;
             if(_settingsAppChanged) {
                 _settingsAppForm.setObjectValues();
                 StatePlugins.instance.savePlugin(id);
+                shouldReload = true;
             }
+            if(_settingsChanged && _settings != null) {
+                _settingsChanged = false;
+                StatePlugins.instance.setPluginSettings(id, _settings!!);
+                shouldReload = true;
+                UIDialogs.toast(context.getString(R.string.plugin_settings_saved), false);
+            }
+            if(shouldReload)
+                reloadSource(id);
         }
 
 
@@ -134,9 +147,69 @@ class SourceDetailFragment : MainFragment() {
                         //App settings
                         try {
                             _settingsAppForm.fromObject(source.descriptor.appSettings);
+                            if(source.config.developerSubmitUrl.isNullOrEmpty()) {
+                                val field = _settingsAppForm.findField("devSubmit");
+                                field?.setValue(false);
+                                if(field is View)
+                                    field.isVisible = false;
+                            }
+                            if(!source.capabilities.hasGetUserHistory || !source.isLoggedIn) {
+                                val field = _settingsAppForm.findField("sync");
+                                if(field is View)
+                                    field.isVisible = false;
+                            }
+                            else {
+                                val field = _settingsAppForm.findField("syncHistory");
+                                field?.onChanged?.subscribe { field, new, old ->
+                                    if(old != new && new == true && StatePlatform.instance.isClientEnabled(config.id)) {
+                                        UIDialogs.showDialog(context, R.drawable.ic_sources, "Would you like to sync now?",
+                                            "This will attempt to update your history from the platform, when this setting is enabled, it is done during startup.", null, 0,
+                                            UIDialogs.Action("No", {
+
+                                            }),
+                                            UIDialogs.Action("Yes", {
+                                                UIDialogs.showDialogProgress(context, {
+                                                    it.setText("Importing history..");
+                                                    fragment.lifecycleScope.launch(Dispatchers.IO) {
+                                                        try {
+                                                            val client = StatePlatform.instance.getClient(config.id);
+                                                            if (client != null && client is JSClient) {
+                                                                val count = StateHistory.instance.syncRemoteHistory(client);
+                                                                withContext(Dispatchers.Main) {
+                                                                    it.hide();
+                                                                    if(count > 0)
+                                                                        UIDialogs.showDialogOk(context, R.drawable.ic_pair_success, "Imported ${count} history items");
+                                                                    else
+                                                                        UIDialogs.showDialogOk(context, R.drawable.ic_help, "Imported no history items");
+                                                                }
+
+                                                            }
+                                                        }
+                                                        catch(ex: Throwable) {
+                                                            withContext(Dispatchers.Main) {
+                                                                UIDialogs.appToast("Sync History failed due to:\n" + ex.message);
+                                                                it.hide();
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            }, UIDialogs.ActionStyle.PRIMARY));
+                                    }
+                                }
+                            }
                             _settingsAppForm.onChanged.clear();
                             _settingsAppForm.onChanged.subscribe { field, value ->
                                 _settingsAppChanged = true;
+                                if(field.descriptor?.id == "devSubmit") {
+                                    if(value is Boolean && value) {
+                                        UIDialogs.showDialog(context, R.drawable.ic_warning_yellow,
+                                            "Are you sure you trust the developer?",
+                                            "Developers may gain access to sensitive data. Only enable this when you are trying to help the developer fix a bug.\nThe following domain is used:",
+                                                source.config.developerSubmitUrl ?: "", 0,
+                                            UIDialogs.Action("Cancel", { field.setValue(false); }, UIDialogs.ActionStyle.NONE),
+                                            UIDialogs.Action("Enable", {  }, UIDialogs.ActionStyle.DANGEROUS));
+                                    }
+                                }
                             }
                         } catch (e: Throwable) {
                             Logger.e(TAG, "Failed to load app settings form from plugin settings", e)
@@ -150,7 +223,7 @@ class SourceDetailFragment : MainFragment() {
                                 context.getString(R.string.these_settings_are_defined_by_the_plugin)
                             );
                             _settingsForm.onChanged.clear();
-                            _settingsForm.onChanged.subscribe { field, value ->
+                            _settingsForm.onChanged.subscribe { _, _ ->
                                 _settingsChanged = true;
                             }
                         } catch (e: Throwable) {
@@ -209,7 +282,19 @@ class SourceDetailFragment : MainFragment() {
                 BigButtonGroup(c, context.getString(R.string.update),
                     BigButton(c, context.getString(R.string.check_for_updates), context.getString(R.string.checks_for_new_versions_of_the_source), R.drawable.ic_update) {
                         checkForUpdatesSource();
-                    }
+                    },
+                    if(config.changelog?.any() == true)
+                        BigButton(c, context.getString(R.string.changelog), context.getString(R.string.changelog_plugin_description), R.drawable.ic_list) {
+                            UIDialogs.showChangelogDialog(context, config.version, config.changelog!!.filterKeys { it.toIntOrNull() != null }
+                                .mapKeys { it.key.toInt() }
+                                .mapValues { config.getChangelogString(it.key.toString()) ?: "" });
+                        }.apply {
+                            this.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                                setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
+                            };
+                        }
+                    else
+                        null
                 )
             );
 
@@ -264,22 +349,58 @@ class SourceDetailFragment : MainFragment() {
                             }
                         )
                     );
+
+                    val migrationButtons = mutableListOf<BigButton>();
+                    if (isEnabled && source.capabilities.hasGetUserSubscriptions) {
+                        migrationButtons.add(
+                            BigButton(c, context.getString(R.string.import_subscriptions), context.getString(R.string.login_required), R.drawable.ic_subscriptions) {
+
+                            }.apply { this.alpha = 0.5f }
+                        );
+                    }
+
+                    if (isEnabled && source.capabilities.hasGetUserPlaylists && source.capabilities.hasGetPlaylist) {
+                        val bigButton = BigButton(c, context.getString(R.string.import_playlists), context.getString(R.string.login_required), R.drawable.ic_playlist) {
+
+                        }.apply { this.alpha = 0.5f };
+
+                        bigButton.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                            setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
+                        };
+
+                        migrationButtons.add(bigButton);
+                    }
+
+                    if (migrationButtons.size > 0) {
+                        groups.add(BigButtonGroup(c, context.getString(R.string.migration), *migrationButtons.toTypedArray()));
+                    }
                 }
             }
 
-            val clientIfExists = StatePlugins.instance.getPlugin(config.id);
+            val isEmbedded = StatePlugins.instance.getEmbeddedSources(context).any { it.key == config.id };
+
+            val clientIfExists = if(config.id != StateDeveloper.DEV_ID)
+                StatePlugins.instance.getPlugin(config.id);
+            else null;
             groups.add(
                 BigButtonGroup(c, context.getString(R.string.management),
-                    BigButton(c, context.getString(R.string.uninstall), context.getString(R.string.removes_the_plugin_from_the_app), R.drawable.ic_block) {
+                    if(!isEmbedded) BigButton(c, context.getString(R.string.uninstall), context.getString(R.string.removes_the_plugin_from_the_app), R.drawable.ic_block) {
                         uninstallSource();
                     }.withBackground(R.drawable.background_big_button_red).apply {
                         this.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                             setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
                         };
+                    } else BigButton(c, context.getString(R.string.uninstall), "Cannot uninstall embedded plugins", R.drawable.ic_block, {}).apply {
+                        this.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                            setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
+                        };
+                        this.alpha = 0.5f
                     },
                     if(clientIfExists?.captchaEncrypted != null)
                         BigButton(c, context.getString(R.string.delete_captcha), context.getString(R.string.deletes_stored_captcha_answer_for_this_plugin), R.drawable.ic_block) {
                             clientIfExists.updateCaptcha(null);
+                            updateButtons();
+                            UIDialogs.toast(context, "Captcha data deleted");
                         }.apply {
                             this.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                                 setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
@@ -293,7 +414,6 @@ class SourceDetailFragment : MainFragment() {
                 _sourceButtons.addView(group);
             }
 
-            val isEmbedded = StatePlugins.instance.getEmbeddedSources(context).any { it.key == config.id };
             val advancedButtons = BigButtonGroup(c, "Advanced",
                 BigButton(c, "Edit Code", "Modify the source of this plugin", R.drawable.ic_code) {
 
@@ -301,9 +421,15 @@ class SourceDetailFragment : MainFragment() {
                     this.alpha = 0.5f;
                 },
                 if(isEmbedded) BigButton(c, "Reinstall", "Modify the source of this plugin", R.drawable.ic_refresh) {
-                    StatePlugins.instance.updateEmbeddedPlugins(context, listOf(config.id), true);
-                    reloadSource(config.id);
-                    UIDialogs.toast(context, "Embedded plugin reinstalled, may require refresh");
+                    val embeddedConfig = StatePlugins.instance.getEmbeddedPluginConfigFromID(context, config.id);
+
+                    UIDialogs.showDialog(context, R.drawable.ic_warning_yellow, "Are you sure you want to downgrade (${config.version}=>${embeddedConfig?.version})?",
+                        "This will revert the plugin back to the originally embedded version.\nVersion change: ${config.version}=>${embeddedConfig?.version}", null,
+                        0, UIDialogs.Action("Cancel", {}), UIDialogs.Action("Reinstall", {
+                            StatePlugins.instance.updateEmbeddedPlugins(context, listOf(config.id), true);
+                            reloadSource(config.id);
+                            UIDialogs.toast(context, "Embedded plugin reinstalled, may require refresh");
+                        }, UIDialogs.ActionStyle.DANGEROUS));
                 }.apply {
                     this.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         setMargins(0, TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, resources.displayMetrics).toInt(), 0, 0);
@@ -322,18 +448,49 @@ class SourceDetailFragment : MainFragment() {
             if(config.authentication == null)
                 return;
 
-            LoginActivity.showLogin(StateApp.instance.context, config) {
-                StatePlugins.instance.setPluginAuth(config.id, it);
-
-                reloadSource(config.id);
-            };
+            if(config.authentication.loginWarning != null) {
+                UIDialogs.showDialog(context, R.drawable.ic_warning_yellow, "Login Warning",
+                    config.authentication.loginWarning, null, 0,
+                    UIDialogs.Action("Cancel", {}, UIDialogs.ActionStyle.NONE),
+                    UIDialogs.Action("Login", {
+                        LoginActivity.showLogin(StateApp.instance.context, config) {
+                            try {
+                                StatePlugins.instance.setPluginAuth(config.id, it);
+                                reloadSource(config.id);
+                            } catch (e: Throwable) {
+                                StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                                    context?.let { c -> UIDialogs.showGeneralErrorDialog(c, "Failed to set plugin authentication (loginSource, loginWarning)", e) }
+                                }
+                                Logger.e(TAG, "Failed to set plugin authentication (loginSource, loginWarning)", e)
+                            }
+                        };
+                    }, UIDialogs.ActionStyle.PRIMARY))
+            }
+            else
+                LoginActivity.showLogin(StateApp.instance.context, config) {
+                    try {
+                        StatePlugins.instance.setPluginAuth(config.id, it);
+                        reloadSource(config.id);
+                    } catch (e: Throwable) {
+                        StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                            context?.let { c -> UIDialogs.showGeneralErrorDialog(c, "Failed to set plugin authentication (loginSource)", e) }
+                        }
+                        Logger.e(TAG, "Failed to set plugin authentication (loginSource)", e)
+                    }
+                };
         }
         private fun logoutSource(clear: Boolean = true) {
             val config = _config ?: return;
 
-            StatePlugins.instance.setPluginAuth(config.id, null);
-            reloadSource(config.id);
-
+            try {
+                StatePlugins.instance.setPluginAuth(config.id, null);
+                reloadSource(config.id);
+            } catch (e: Throwable) {
+                StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
+                    context?.let { c -> UIDialogs.showGeneralErrorDialog(c, "Failed to clear plugin authentication", e) }
+                }
+                Logger.e(TAG, "Failed to clear plugin authentication", e)
+            }
 
             //TODO: Maybe add a dialog option..
             if(Settings.instance.plugins.clearCookiesOnLogout && clear) {
@@ -422,6 +579,7 @@ class SourceDetailFragment : MainFragment() {
                 }
             });
         }
+
         private fun checkForUpdatesSource() {
             val c = _config ?: return;
             val sourceUrl = c.sourceUrl ?: return;
@@ -451,8 +609,8 @@ class SourceDetailFragment : MainFragment() {
 
                     Logger.i(TAG, "Update is available (config.version=${config.version}, source.config.version=${c.version}).");
 
-                    val c = context ?: return@launch;
-                    val intent = Intent(c, AddSourceActivity::class.java).apply {
+                    val ctx = context ?: return@launch;
+                    val intent = Intent(ctx, AddSourceActivity::class.java).apply {
                         data = Uri.parse(sourceUrl)
                     };
 
@@ -490,5 +648,9 @@ class SourceDetailFragment : MainFragment() {
     companion object {
         const val TAG = "SourceDetailFragment";
         fun newInstance() = SourceDetailFragment().apply {}
+    }
+
+    class UpdatePluginAction(val config: SourcePluginConfig) {
+
     }
 }

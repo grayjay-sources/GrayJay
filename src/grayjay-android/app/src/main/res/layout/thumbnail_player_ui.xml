@@ -25,6 +25,7 @@
             android:id="@+id/thumbnail_player_unmute"
             android:layout_width="34dp"
             android:layout_height="34dp"
+            android:contentDescription="@string/cd_thumbnail_player_unmute"
             android:padding="7dp"
             android:layout_gravity="center_vertical"
             android:background="@color/transparent"
@@ -103,16 +104,17 @@
                 android:textStyle="normal" />
         </LinearLayout>
 
-        <com.google.android.exoplayer2.ui.DefaultTimeBar
+        <androidx.media3.ui.DefaultTimeBar
             android:id="@id/exo_progress"
             android:layout_width="match_parent"
             android:layout_height="16dp"
-            android:layout_marginBottom="-1dp"
+            android:layout_marginBottom="-2dp"
             android:paddingStart="0dp"
             app:scrubber_drawable="@drawable/player_thumb"
             app:bar_height="2dp"
             app:scrubber_disabled_size="0dp"
-            app:scrubber_enabled_size="12dp"
+            app:scrubber_enabled_size="16dp"
+            app:scrubber_dragged_size="20dp"
             app:played_color="@color/colorPrimary"
             app:buffered_color="#DDEEEEEE"
             app:unplayed_color="#55EEEEEE" />

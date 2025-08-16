@@ -1,14 +1,8 @@
 package com.futo.platformplayer.states
 
-import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.provider.DocumentsContract.EXTRA_INITIAL_URI
-import androidx.activity.ComponentActivity
 import androidx.core.app.ShareCompat
 import androidx.core.content.FileProvider
-import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import com.futo.platformplayer.R
 import com.futo.platformplayer.Settings
@@ -16,36 +10,39 @@ import com.futo.platformplayer.UIDialogs
 import com.futo.platformplayer.activities.IWithResultLauncher
 import com.futo.platformplayer.activities.MainActivity
 import com.futo.platformplayer.activities.SettingsActivity
+import com.futo.platformplayer.api.media.models.channels.SerializedChannel
+import com.futo.platformplayer.api.media.models.video.IPlatformVideo
 import com.futo.platformplayer.api.media.models.video.SerializedPlatformVideo
 import com.futo.platformplayer.copyTo
-import com.futo.platformplayer.copyToOutputStream
-import com.futo.platformplayer.encryption.EncryptionProvider
-import com.futo.platformplayer.getInputStream
+import com.futo.platformplayer.encryption.GPasswordEncryptionProvider
+import com.futo.platformplayer.encryption.GPasswordEncryptionProviderV0
+import com.futo.platformplayer.fragment.mainactivity.main.ImportSubscriptionsFragment
 import com.futo.platformplayer.getNowDiffHours
-import com.futo.platformplayer.getOutputStream
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.models.HistoryVideo
+import com.futo.platformplayer.models.ImportCache
+import com.futo.platformplayer.models.SubscriptionGroup
 import com.futo.platformplayer.readBytes
 import com.futo.platformplayer.stores.FragmentedStorage
 import com.futo.platformplayer.stores.v2.ManagedStore
 import com.futo.platformplayer.writeBytes
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.time.OffsetDateTime
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
-import kotlin.IllegalStateException
 
 class StateBackup {
     companion object {
@@ -62,19 +59,23 @@ class StateBackup {
             val secondaryBackupFile = dir.findFile("GrayjayBackup.ezip.old") ?: if(create) dir.createFile("grayjay/ezip", "GrayjayBackup.ezip.old") else null;
             return Pair(mainBackupFile, secondaryBackupFile);
         }
-        /*
-        private fun getAutomaticBackupFiles(): Pair<File, File> {
-            val dir = StateApp.instance.getExternalRootDirectory();
-            if(dir == null)
-                throw IllegalStateException("Can't access external files");
-            return Pair(File(dir, "GrayjayBackup.ezip"), File(dir, "GrayjayBackup.ezip.old"))
-        }*/
-
-
         fun getAllMigrationStores(): List<ManagedStore<*>> = listOf(
             StateSubscriptions.instance.toMigrateCheck(),
             StatePlaylists.instance.toMigrateCheck()
         ).flatten();
+
+        fun getCache(additionalVideos: List<SerializedPlatformVideo> = listOf()): ImportCache {
+            val allPlaylists = StatePlaylists.instance.getPlaylists();
+            val videos = allPlaylists.flatMap { it.videos }.plus(additionalVideos).distinctBy { it.url };
+
+            val allSubscriptions = StateSubscriptions.instance.getSubscriptions();
+            val channels = allSubscriptions.map { it.channel };
+
+            return ImportCache(
+                videos = videos,
+                channels = channels
+            );
+        }
 
 
         private fun getAutomaticBackupPassword(customPassword: String? = null): String {
@@ -82,7 +83,7 @@ class StateBackup {
             val pbytes = password.toByteArray();
             if(pbytes.size < 4 || pbytes.size > 32)
                 throw IllegalStateException("Automatic backup passwords should atleast be 4 character and smaller than 32");
-            return password.padStart(32, '9');
+            return password;
         }
         fun hasAutomaticBackup(): Boolean {
             val context = StateApp.instance.contextOrNull ?: return false;
@@ -106,8 +107,8 @@ class StateBackup {
                         val data = export();
                         val zip = data.asZip();
 
-                        val encryptedZip = EncryptionProvider.instance.encrypt(zip, getAutomaticBackupPassword());
-
+                        //Prepend some magic bytes to identify everything version 1 and up
+                        val encryptedZip = byteArrayOf(0x11, 0x22, 0x33, 0x44, GPasswordEncryptionProvider.version.toByte()) + GPasswordEncryptionProvider.instance.encrypt(zip, getAutomaticBackupPassword());
                         if(!Settings.instance.storage.isStorageMainValid(context)) {
                             StateApp.instance.scopeOrNull?.launch(Dispatchers.Main) {
                                 UIDialogs.toast("Missing permissions for auto-backup, please set the external general directory in settings");
@@ -117,7 +118,7 @@ class StateBackup {
                             val backupFiles = getAutomaticBackupDocumentFiles(context, true);
                             val exportFile = backupFiles.first;
                             if (exportFile?.exists() == true && backupFiles.second != null)
-                                exportFile!!.copyTo(context, backupFiles.second!!);
+                                exportFile.copyTo(context, backupFiles.second!!);
                             exportFile!!.writeBytes(context, encryptedZip);
 
                             Settings.instance.backup.lastAutoBackupTime = OffsetDateTime.now(); //OffsetDateTime.now();
@@ -151,8 +152,7 @@ class StateBackup {
                         throw IllegalStateException("Backup file does not exist");
 
                     val backupBytesEncrypted = backupFiles.first!!.readBytes(context) ?: throw IllegalStateException("Could not read stream of [${backupFiles.first?.uri}]");
-                    val backupBytes = EncryptionProvider.instance.decrypt(backupBytesEncrypted, getAutomaticBackupPassword(password));
-                    importZipBytes(context, scope, backupBytes);
+                    importEncryptedZipBytes(context, scope, backupBytesEncrypted, password);
                     Logger.i(TAG, "Finished AutoBackup restore");
                 }
                 catch (exSec: FileNotFoundException) {
@@ -179,14 +179,43 @@ class StateBackup {
                         throw ex;
 
                     val backupBytesEncrypted = backupFiles.second!!.readBytes(context) ?: throw IllegalStateException("Could not read stream of [${backupFiles.second?.uri}]");
-                    val backupBytes = EncryptionProvider.instance.decrypt(backupBytesEncrypted, getAutomaticBackupPassword(password));
-                    importZipBytes(context, scope, backupBytes);
+                    importEncryptedZipBytes(context, scope, backupBytesEncrypted, password);
                     Logger.i(TAG, "Finished AutoBackup restore");
                 }
             }
         }
 
-        fun startExternalBackup() {
+        private fun importEncryptedZipBytes(context: Context, scope: CoroutineScope, backupBytesEncrypted: ByteArray, password: String) {
+            val backupBytes: ByteArray;
+            //Check magic bytes indicating version 1 and up
+            if (backupBytesEncrypted[0] == 0x11.toByte() && backupBytesEncrypted[1] == 0x22.toByte() && backupBytesEncrypted[2] == 0x33.toByte() && backupBytesEncrypted[3] == 0x44.toByte()) {
+                val version = backupBytesEncrypted[4].toInt();
+                if (version != GPasswordEncryptionProvider.version) {
+                    throw Exception("Invalid encryption version");
+                }
+
+                backupBytes = GPasswordEncryptionProvider.instance.decrypt(backupBytesEncrypted.sliceArray(IntRange(5, backupBytesEncrypted.size - 1)), getAutomaticBackupPassword(password))
+            } else {
+                //Else its a version 0
+                backupBytes = GPasswordEncryptionProviderV0(getAutomaticBackupPassword(password).padStart(32, '9')).decrypt(backupBytesEncrypted);
+            }
+
+            importZipBytes(context, scope, backupBytes);
+        }
+
+        fun saveExternalBackup(activity: IWithResultLauncher) {
+            val data = export();
+            if(activity is Context)
+                StateApp.instance.requestFileCreateAccess(activity, null, "application/zip") {
+                    if(it == null) {
+                        UIDialogs.toast("Cancelled");
+                        return@requestFileCreateAccess;
+                    }
+                    it.writeBytes(activity, data.asZip());
+                    UIDialogs.toast("Export saved");
+                };
+        }
+        fun shareExternalBackup() {
             val data = export();
             val now = OffsetDateTime.now();
             val exportFile = File(
@@ -214,6 +243,23 @@ class StateBackup {
                 .associateBy { it.name }
                 .mapValues { it.value.getAllReconstructionStrings() }
                 .toMutableMap();
+
+            var historyVideos: List<SerializedPlatformVideo>? = null;
+            try {
+                storesToSave.set("subscription_groups", StateSubscriptionGroups.instance.getSubscriptionGroups().map { Json.encodeToString(it) });
+            }
+            catch(ex: Throwable) {
+                Logger.e(TAG, "Failed to serialize subscription groups");
+            }
+            try {
+                val history = StateHistory.instance.getRecentHistory(OffsetDateTime.MIN, 2000);
+                historyVideos = history.map { it.video };
+                storesToSave.set("history", history.map { it.toReconString() });
+            }
+            catch(ex: Throwable) {
+                Logger.e(TAG, "Failed to serialize history");
+            }
+
             val settings = Settings.instance.encode();
             val pluginSettings = StatePlugins.instance.getPlugins()
                 .associateBy { it.config.id }
@@ -223,11 +269,10 @@ class StateBackup {
                 .associateBy { it.config.id }
                 .mapValues { it.value.config.sourceUrl!! };
 
+            val cache = getCache(historyVideos ?: listOf());
 
-            val export = ExportStructure(exportInfo, settings, storesToSave, pluginUrls, pluginSettings);
-            //export.videoCache = StatePlaylists.instance.getHistory()
-            //    .distinctBy { it.video.url }
-            //    .map { it.video };
+            val export = ExportStructure(exportInfo, settings, storesToSave, pluginUrls, pluginSettings, cache);
+
             return export;
         }
 
@@ -308,19 +353,64 @@ class StateBackup {
                                 if(doImportStores) {
                                     for(store in export.stores) {
                                         Logger.i(TAG, "Importing store [${store.key}]");
-                                        val relevantStore = availableStores.find { it.name == store.key };
-                                        if(relevantStore == null) {
-                                            Logger.w(TAG, "Unknown store [${store.key}] import");
-                                            continue;
+                                        if(store.key == "history") {
+                                            withContext(Dispatchers.Main) {
+                                                UIDialogs.showDialog(context, R.drawable.ic_move_up, "Import History", "Would you like to import history?", null, 0,
+                                                    UIDialogs.Action("No", {
+                                                    }, UIDialogs.ActionStyle.NONE),
+                                                    UIDialogs.Action("Yes", {
+                                                        for(historyStr in store.value) {
+                                                            try {
+                                                                val histObj = HistoryVideo.fromReconString(historyStr) { url ->
+                                                                    return@fromReconString export.cache?.videos?.firstOrNull { it.url == url };
+                                                                }
+                                                                val hist = StateHistory.instance.getHistoryByVideo(histObj.video, true, histObj.date);
+                                                                if(hist != null)
+                                                                    StateHistory.instance.updateHistoryPosition(histObj.video, hist, true, histObj.position, histObj.date, false);
+                                                            }
+                                                            catch(ex: Throwable) {
+                                                                Logger.e(TAG, "Failed to import subscription group", ex);
+                                                            }
+                                                        }
+                                                    }, UIDialogs.ActionStyle.PRIMARY))
+                                            }
                                         }
-                                        withContext(Dispatchers.Main) {
-                                            UIDialogs.showImportDialog(context, relevantStore, store.key, store.value) {
-                                                synchronized(toAwait) {
-                                                    toAwait.remove(store.key);
-                                                    if(toAwait.isEmpty())
-                                                        onConclusion();
-                                                }
-                                            };
+                                        else if(store.key == "subscription_groups") {
+                                            withContext(Dispatchers.Main) {
+                                                UIDialogs.showDialog(context, R.drawable.ic_move_up, "Import Subscription Groups", "Would you like to import subscription groups?\nExisting groups with the same id will be overridden!", null, 0,
+                                                    UIDialogs.Action("No", {
+                                                    }, UIDialogs.ActionStyle.NONE),
+                                                    UIDialogs.Action("Yes", {
+                                                        for(groupStr in store.value) {
+                                                            try {
+                                                                val group = Json.decodeFromString<SubscriptionGroup>(groupStr);
+                                                                val existing = StateSubscriptionGroups.instance.getSubscriptionGroup(group.id);
+                                                                if(existing != null)
+                                                                    StateSubscriptionGroups.instance.deleteSubscriptionGroup(existing.id, false);
+                                                                StateSubscriptionGroups.instance.updateSubscriptionGroup(group);
+                                                            }
+                                                            catch(ex: Throwable) {
+                                                                Logger.e(TAG, "Failed to import subscription group", ex);
+                                                            }
+                                                        }
+                                                    }, UIDialogs.ActionStyle.PRIMARY))
+                                            }
+                                        }
+                                        else {
+                                            val relevantStore = availableStores.find { it.name == store.key };
+                                            if (relevantStore == null) {
+                                                Logger.w(TAG, "Unknown store [${store.key}] import");
+                                                continue;
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                UIDialogs.showImportDialog(context, relevantStore, store.key, store.value, export.cache) {
+                                                    synchronized(toAwait) {
+                                                        toAwait.remove(store.key);
+                                                        if(toAwait.isEmpty())
+                                                            onConclusion();
+                                                    }
+                                                };
+                                            }
                                         }
                                     }
                                 }
@@ -395,6 +485,46 @@ class StateBackup {
                 ).withCondition { doImport } else null
             );
         }
+
+        fun importTxt(context: MainActivity, text: String, allowFailure: Boolean = false): Boolean {
+            if(text.startsWith("@/Subscription") || text.startsWith("Subscriptions")) {
+                val lines = text.split("\n").map { it.trim() }.drop(1).filter { it.isNotEmpty() };
+                context.navigate(context.getFragment<ImportSubscriptionsFragment>(), lines);
+                return true;
+            }
+            else if(allowFailure) {
+                UIDialogs.showGeneralErrorDialog(context, "Unknown text header [${text}]");
+            }
+            return false;
+        }
+        fun importNewPipeSubs(context: MainActivity, json: String) {
+            val newPipeSubsParsed = JsonParser.parseString(json).asJsonObject;
+            if (!newPipeSubsParsed.has("subscriptions") || !newPipeSubsParsed["subscriptions"].isJsonArray)
+                UIDialogs.showGeneralErrorDialog(context, "Invalid json");
+            else {
+                importNewPipeSubs(context, newPipeSubsParsed);
+            }
+        }
+        fun importNewPipeSubs(context: MainActivity, obj: JsonObject) {
+            try {
+                val jsonSubs = obj["subscriptions"]
+                val jsonSubsArray = jsonSubs.asJsonArray;
+                val jsonSubsArrayItt = jsonSubsArray.iterator();
+                val subs = mutableListOf<String>()
+                while(jsonSubsArrayItt.hasNext()) {
+                    val jsonSubObj = jsonSubsArrayItt.next().asJsonObject;
+
+                    if(jsonSubObj.has("url"))
+                        subs.add(jsonSubObj["url"].asString);
+                }
+
+                context.navigate(context.getFragment<ImportSubscriptionsFragment>(), subs);
+            }
+            catch(ex: Exception) {
+                Logger.e("StateBackup", ex.message, ex);
+                UIDialogs.showGeneralErrorDialog(context, context.getString(R.string.failed_to_parse_newpipe_subscriptions), ex);
+            }
+        }
     }
 
     class ExportStructure(
@@ -403,8 +533,8 @@ class StateBackup {
         val stores: Map<String, List<String>>,
         val plugins: Map<String, String>,
         val pluginSettings: Map<String, Map<String, String?>>,
+        var cache: ImportCache? = null
     ) {
-        var videoCache: List<SerializedPlatformVideo>? = null;
 
         fun asZip(): ByteArray {
             return ByteArrayOutputStream().use { byteStream ->
@@ -428,20 +558,43 @@ class StateBackup {
 
                     zipStream.putNextEntry(ZipEntry("plugin_settings"));
                     zipStream.write(Json.encodeToString(pluginSettings).toByteArray());
+
+                    if(cache != null) {
+                        if(cache?.videos != null) {
+                            zipStream.putNextEntry(ZipEntry("cache_videos"));
+                            zipStream.write(Json.encodeToString(cache!!.videos).toByteArray());
+                        }
+                        if(cache?.channels != null) {
+                            zipStream.putNextEntry(ZipEntry("cache_channels"));
+                            zipStream.write(Json.encodeToString(cache!!.channels).toByteArray());
+                        }
+                    }
                 };
                 return byteStream.toByteArray();
             }
         }
 
         companion object {
+            fun fromZipBytes(str: ByteArrayInputStream): ExportStructure {
+                var zip: ZipInputStream? = null;
+                try {
+                        zip = ZipInputStream(str);
+                    return fromZip(zip);
+                }
+                finally {
+                    zip?.close();
+                }
+            }
             fun fromZip(zipStream: ZipInputStream): ExportStructure {
-                var entry: ZipEntry? = null
+                var entry: ZipEntry?
 
                 var exportInfo: Map<String, String> = mapOf();
                 var settings: String? = null;
-                var stores: MutableMap<String, List<String>> = mutableMapOf();
+                val stores: MutableMap<String, List<String>> = mutableMapOf();
                 var plugins: Map<String, String> = mapOf();
                 var pluginSettings: Map<String, Map<String, String?>> = mapOf();
+                var videoCache: List<SerializedPlatformVideo>? = null
+                var channelCache: List<SerializedChannel>? = null
 
                 while (zipStream.nextEntry.also { entry = it } != null) {
                     if(entry!!.isDirectory)
@@ -453,6 +606,22 @@ class StateBackup {
                                 "settings" -> settings = String(zipStream.readBytes());
                                 "plugins" -> plugins = Json.decodeFromString(String(zipStream.readBytes()));
                                 "plugin_settings" -> pluginSettings = Json.decodeFromString(String(zipStream.readBytes()));
+                                "cache_videos" -> {
+                                    try {
+                                        videoCache = Json.decodeFromString(String(zipStream.readBytes()));
+                                    }
+                                    catch(ex: Exception) {
+                                        Logger.e(TAG, "Couldn't deserialize video cache", ex);
+                                    }
+                                };
+                                "cache_channels" -> {
+                                    try {
+                                        channelCache = Json.decodeFromString(String(zipStream.readBytes()));
+                                    }
+                                    catch(ex: Exception) {
+                                        Logger.e(TAG, "Couldn't deserialize channel cache", ex);
+                                    }
+                                };
                             }
                         else
                             stores[entry!!.name.substring("stores/".length)] = Json.decodeFromString(String(zipStream.readBytes()));
@@ -461,7 +630,10 @@ class StateBackup {
                         throw IllegalStateException("Failed to parse zip [${entry?.name}] due to ${ex.message}");
                     }
                 }
-                return ExportStructure(exportInfo, settings, stores, plugins, pluginSettings);
+                return ExportStructure(exportInfo, settings, stores, plugins, pluginSettings, ImportCache(
+                    videos = videoCache,
+                    channels = channelCache
+                ));
             }
         }
     }

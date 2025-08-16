@@ -1,41 +1,41 @@
 package com.futo.platformplayer.states
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
-import android.os.Environment
 import android.provider.DocumentsContract
 import android.util.DisplayMetrics
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.net.toUri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.work.*
 import com.futo.platformplayer.*
 import com.futo.platformplayer.R
+import com.futo.platformplayer.UIDialogs.Action
+import com.futo.platformplayer.UIDialogs.ActionStyle
+import com.futo.platformplayer.UIDialogs.Companion.showDialog
 import com.futo.platformplayer.activities.CaptchaActivity
 import com.futo.platformplayer.activities.IWithResultLauncher
 import com.futo.platformplayer.activities.MainActivity
-import com.futo.platformplayer.api.media.Serializer
+import com.futo.platformplayer.activities.SettingsActivity
+import com.futo.platformplayer.activities.SettingsActivity.Companion.settingsActivityClosed
 import com.futo.platformplayer.api.media.platforms.js.DevJSClient
 import com.futo.platformplayer.api.media.platforms.js.JSClient
-import com.futo.platformplayer.api.media.platforms.js.internal.JSHttpClient
 import com.futo.platformplayer.background.BackgroundWorker
-import com.futo.platformplayer.cache.ChannelContentCache
 import com.futo.platformplayer.casting.StateCasting
 import com.futo.platformplayer.constructs.Event0
+import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.engine.exceptions.ScriptCaptchaRequiredException
 import com.futo.platformplayer.fragment.mainactivity.main.HomeFragment
 import com.futo.platformplayer.fragment.mainactivity.main.SourceDetailFragment
@@ -47,16 +47,13 @@ import com.futo.platformplayer.receivers.AudioNoisyReceiver
 import com.futo.platformplayer.services.DownloadService
 import com.futo.platformplayer.stores.FragmentedStorage
 import com.futo.platformplayer.stores.v2.ManagedStore
-import com.stripe.android.core.utils.encodeToJson
+import com.futo.platformplayer.views.ToastView
+import com.futo.polycentric.core.ApiMethods
 import kotlinx.coroutines.*
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import java.io.File
-import java.time.OffsetDateTime
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.system.measureTimeMillis
-import kotlin.time.measureTime
 
 /***
  * This class contains global context for unconventional cases where obtaining context is hard.
@@ -66,19 +63,20 @@ import kotlin.time.measureTime
 class StateApp {
     val isMainActive: Boolean get() = contextOrNull != null && contextOrNull is MainActivity; //if context is MainActivity, it means its active
 
-    /*
-    private val externalRootDirectory = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Grayjay");
+    val sessionId = UUID.randomUUID().toString();
 
-    fun getExternalRootDirectory(): File? {
-        if(!externalRootDirectory.exists()) {
-            val result = externalRootDirectory.mkdirs();
-            if(!result)
-                return null;
-            return externalRootDirectory;
+    var privateMode: Boolean = false
+        get(){
+            return field;
         }
-        else
-            return externalRootDirectory;
-    }*/
+        private set(value) {
+            field = value;
+        }
+    val privateModeChanged = Event1<Boolean>();
+    fun setPrivacyMode(value: Boolean) {
+        privateMode = value;
+        privateModeChanged.emit(privateMode);
+    }
 
     fun getExternalGeneralDirectory(context: Context): DocumentFile? {
         val generalUri = Settings.instance.storage.getStorageGeneralUri();
@@ -111,17 +109,13 @@ class StateApp {
         return null;
     }
     fun changeExternalDownloadDirectory(context: IWithResultLauncher, onChanged: ((DocumentFile?)->Unit)? = null) {
-
-        scopeOrNull?.launch(Dispatchers.Main) {
-            UIDialogs.toast("External download directory not yet used by export (WIP)");
-        };
         if(context is Context)
             requestDirectoryAccess(context, "Download Exports", "This directory is used to export downloads to for external usage.", null) {
                 if(it != null)
                     context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_WRITE_URI_PERMISSION.or(Intent.FLAG_GRANT_READ_URI_PERMISSION));
                 if(it != null && isValidStorageUri(context, it)) {
                     Logger.i(TAG, "Changed external download directory: ${it}");
-                    Settings.instance.storage.storage_general = it.toString();
+                    Settings.instance.storage.storage_download = it.toString();
                     Settings.instance.save();
 
                     onChanged?.invoke(getExternalDownloadDirectory(context));
@@ -162,12 +156,12 @@ class StateApp {
         return thisContext;
     }
 
+    private var _mainId: String? = null;
+
     //Files
     private var _tempDirectory: File? = null;
-
-
-    //AutoRotate
-    var systemAutoRotate: Boolean = false;
+    private var _cacheDirectory: File? = null;
+    private var _persistentDirectory: File? = null;
 
     //Network
     private var _lastMeteredState: Boolean = false;
@@ -196,16 +190,15 @@ class StateApp {
         return File(_tempDirectory, name);
     }
 
-    fun getCurrentSystemAutoRotate(): Boolean {
-        _context?.let {
-            systemAutoRotate = android.provider.Settings.System.getInt(
-                it.contentResolver,
-                android.provider.Settings.System.ACCELEROMETER_ROTATION, 0
-            ) == 1;
-        };
-        return systemAutoRotate;
-    }
+    fun getPersistFile(extension: String? = null): File {
+        val name = UUID.randomUUID().toString() +
+                if(extension != null)
+                    ".${extension}"
+                else
+                    "";
 
+        return File(_persistentDirectory, name);
+    }
 
     fun isCurrentMetered(): Boolean {
         ensureConnectivityManager();
@@ -239,14 +232,33 @@ class StateApp {
         return state;
     }
 
-    fun requestFileReadAccess(activity: IWithResultLauncher, path: Uri?, handle: (DocumentFile?)->Unit) {
+    fun requestFileReadAccess(activity: IWithResultLauncher, path: Uri?, contentType: String, handle: (DocumentFile?)->Unit) {
         if(activity is Context) {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT);
             if(path != null)
                 intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, path);
             intent.flags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 .or(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
+            intent.setType(contentType);
+            activity.launchForResult(intent, 98) {
+                if(it.resultCode == Activity.RESULT_OK) {
+                    val uri = it.data?.data;
+                    if(uri != null)
+                        handle(DocumentFile.fromSingleUri(activity, uri));
+                }
+                else
+                    UIDialogs.showDialogOk(context, R.drawable.ic_security_pred, "No access granted");
+            };
+        }
+    }
+    fun requestFileCreateAccess(activity: IWithResultLauncher, path: Uri?, contentType: String, handle: (DocumentFile?)->Unit) {
+        if(activity is Context) {
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT);
+            if(path != null)
+                intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, path);
+            intent.flags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                .or(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setType(contentType);
             activity.launchForResult(intent, 98) {
                 if(it.resultCode == Activity.RESULT_OK) {
                     val uri = it.data?.data;
@@ -285,12 +297,12 @@ class StateApp {
     }
 
     //Lifecycle
-    fun setGlobalContext(context: Context, coroutineScope: CoroutineScope? = null) {
+    fun setGlobalContext(context: Context, coroutineScope: CoroutineScope? = null, mainId: String? = null) {
+        _mainId = mainId;
         _context = context;
         _scope = coroutineScope
+        Logger.w(TAG, "Scope initialized ${(coroutineScope != null)}\n ${Log.getStackTraceString(Throwable())}")
 
-        //System checks
-        systemAutoRotate = getCurrentSystemAutoRotate();
     }
 
     fun initializeFiles(force: Boolean = false) {
@@ -302,6 +314,13 @@ class StateApp {
                 _tempDirectory?.deleteRecursively();
             }
             _tempDirectory?.mkdirs();
+            _cacheDirectory = File(context.filesDir, "cache");
+            if(_cacheDirectory?.exists() == false)
+                _cacheDirectory?.mkdirs();
+            _persistentDirectory = File(context.filesDir, "persist");
+            if(_persistentDirectory?.exists() == false) {
+                _persistentDirectory?.mkdirs();
+            }
         }
     }
 
@@ -326,7 +345,7 @@ class StateApp {
     suspend fun backgroundStarting(context: Context, scope: CoroutineScope, withFiles: Boolean, withPlugins: Boolean) {
         if(contextOrNull == null) {
             Logger.i(TAG, "BACKGROUND STATE: Starting");
-            if(!Logger.hasConsumers && BuildConfig.DEBUG) {
+            if(!Logger.hasConsumers && (BuildConfig.DEBUG)) {
                 Logger.i(TAG, "BACKGROUND STATE: Initialize logger");
                 Logger.setLogConsumers(listOf(AndroidLogConsumer()));
             }
@@ -354,7 +373,13 @@ class StateApp {
     }
 
     fun mainAppStarting(context: Context) {
+        Logger.i(TAG, "MainApp Starting");
         initializeFiles(true);
+
+        if(Settings.instance.other.polycentricLocalCache) {
+            Logger.i(TAG, "Initialize Polycentric Disk Cache")
+            _cacheDirectory?.let { ApiMethods.initCache(it) };
+        }
 
         val logFile = File(context.filesDir, "log.txt");
         if (Settings.instance.logging.logLevel > LogLevel.NONE.value) {
@@ -372,24 +397,51 @@ class StateApp {
 
             Logger.setLogConsumers(listOf(AndroidLogConsumer()));
         }
-
         StatePayment.instance.initialize();
-        StatePolycentric.instance.load(context);
-        StateSaved.instance.load();
 
+        Logger.i(TAG, "MainApp Starting: Initializing [Polycentric]");
+        StatePolycentric.instance.load(context);
+
+        Logger.i(TAG, "MainApp Starting: Initializing [Connectivity]");
         displayMetrics = context.resources.displayMetrics;
         ensureConnectivityManager(context);
 
+        Logger.i(TAG, "MainApp Starting: Cleaning up unused downloads");
+        StateDownloads.instance.cleanupDownloads();
+
+
+        Logger.i(TAG, "MainApp Starting: Initializing [Telemetry]");
         if (!BuildConfig.DEBUG) {
             StateTelemetry.instance.initialize();
             StateTelemetry.instance.upload();
         }
 
+        if (Settings.instance.synchronization.enabled) {
+            StateSync.instance.start(context)
+        }
+
+        settingsActivityClosed.subscribe {
+            if (Settings.instance.synchronization.enabled) {
+                StateSync.instance.start(context)
+            } else {
+                StateSync.instance.stop()
+            }
+        }
+
         Logger.onLogSubmitted.subscribe {
             scopeOrNull?.launch(Dispatchers.Main) {
                 try {
-                    if (it != null) {
-                        UIDialogs.toast("Uploaded " + (it ?: "null"), true);
+                    if (!it.isNullOrEmpty()) {
+                        (SettingsActivity.getActivity() ?: contextOrNull)?.let { c ->
+                            val okButtonAction = Action(c.getString(R.string.ok), {}, ActionStyle.PRIMARY)
+                            val copyButtonAction = Action(c.getString(R.string.copy), {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("Log id", it)
+                                clipboard.setPrimaryClip(clip)
+                            }, ActionStyle.NONE)
+
+                            showDialog(c, R.drawable.ic_error, "Uploaded $it", null, null, 0, copyButtonAction, okButtonAction)
+                        }
                     } else {
                         UIDialogs.toast("Failed to upload");
                     }
@@ -400,13 +452,14 @@ class StateApp {
         }
     }
     fun mainAppStarted(context: Context) {
-        Logger.i(TAG, "App started");
+        Logger.i(TAG, "MainApp Started");
 
         //Start loading cache
         instance.scopeOrNull?.launch(Dispatchers.IO) {
             try {
+                Logger.i(TAG, "MainApp Started: Initializing [ChannelContentCache]");
                 val time = measureTimeMillis {
-                    ChannelContentCache.instance;
+                    StateCache.instance;
                 }
                 Logger.i(TAG, "ChannelContentCache initialized in ${time}ms");
             } catch (e: Throwable) {
@@ -414,15 +467,15 @@ class StateApp {
             }
         }
 
-        StateAnnouncement.instance.registerAnnouncement("fa4647d3-36fa-4c8c-832d-85b00fc72dca", "Disclaimer", "This is an early alpha build of the application, expect bugs and unfinished features.", AnnouncementType.DELETABLE, OffsetDateTime.now())
-
         if(SettingsDev.instance.developerMode && SettingsDev.instance.devServerSettings.devServerOnBoot)
             StateDeveloper.instance.runServer();
 
+        Logger.i(TAG, "MainApp Started: Check [Migration (Subscriptions)]");
         if(StateSubscriptions.instance.shouldMigrate())
             StateSubscriptions.instance.tryMigrateIfNecessary();
 
         if(Settings.instance.downloads.shouldDownload()) {
+            Logger.i(TAG, "MainApp Started: Check [Downloads]");
             StateDownloads.instance.checkForOutdatedPlaylists();
 
             StateDownloads.instance.getDownloadPlaylists();
@@ -430,8 +483,7 @@ class StateApp {
                 DownloadService.getOrCreateService(context);
         }
 
-        StateDownloads.instance.checkForExportTodos();
-
+        Logger.i(TAG, "MainApp Started: Initialize [AutoUpdate]");
         val autoUpdateEnabled = Settings.instance.autoUpdate.isAutoUpdateEnabled();
         val shouldDownload = Settings.instance.autoUpdate.shouldDownload();
         val backgroundDownload = Settings.instance.autoUpdate.backgroundDownload == 1;
@@ -447,7 +499,9 @@ class StateApp {
 
             //Foreground download
             autoUpdateEnabled -> {
-                StateUpdate.instance.checkForUpdates(context, false);
+                scopeOrNull?.launch(Dispatchers.IO) {
+                    StateUpdate.instance.checkForUpdates(context, false)
+                }
             }
 
             else -> {
@@ -455,38 +509,58 @@ class StateApp {
             }
         }
 
+        Logger.i(TAG, "MainApp Started: Initialize [Noisy]");
         _receiverBecomingNoisy?.let {
             _receiverBecomingNoisy = null;
-            context.unregisterReceiver(it);
+            try {
+                context.unregisterReceiver(it);
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to unregister receiver.", e)
+            }
         }
         _receiverBecomingNoisy = AudioNoisyReceiver();
         context.registerReceiver(_receiverBecomingNoisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
 
         //Migration
-        migrateStores(context, listOf(
-            StateSubscriptions.instance.toMigrateCheck(),
-            StatePlaylists.instance.toMigrateCheck()
-        ).flatten(), 0);
+        Logger.i(TAG, "MainApp Started: Check [Migrations]");
+
+        scopeOrNull?.launch(Dispatchers.IO) {
+            try {
+                migrateStores(context, listOf(
+                    StateSubscriptions.instance.toMigrateCheck(),
+                    StatePlaylists.instance.toMigrateCheck()
+                ).flatten(), 0)
+            } catch (e: Throwable) {
+                Logger.e(TAG, "Failed to migrate stores")
+            }
+        }
 
         if(Settings.instance.subscriptions.fetchOnAppBoot) {
             scope.launch(Dispatchers.IO) {
+                Logger.i(TAG, "MainApp Started: Fetch [Subscriptions]");
                 val subRequestCounts = StateSubscriptions.instance.getSubscriptionRequestCount();
                 val reqCountStr = subRequestCounts.map { "    ${it.key.config.name}: ${it.value}/${it.key.getSubscriptionRateLimit()}" }.joinToString("\n");
-                val isRateLimitReached = !subRequestCounts.any { clientCount -> clientCount.key.getSubscriptionRateLimit()?.let { rateLimit -> clientCount.value > rateLimit } == true };
-                if (isRateLimitReached) {
+                val isBelowRateLimit = !subRequestCounts.any { clientCount ->
+                    clientCount.key.getSubscriptionRateLimit()?.let { rateLimit -> clientCount.value > rateLimit } == true
+                };
+                if (isBelowRateLimit) {
                     Logger.w(TAG, "Subscriptions request on boot, request counts:\n${reqCountStr}");
                     delay(5000);
-                    if(StateSubscriptions.instance.getOldestUpdateTime().getNowDiffMinutes() > 5)
-                        StateSubscriptions.instance.updateSubscriptionFeed(scope, false);
+                    scopeOrNull?.let {
+                        if(StateSubscriptions.instance.getOldestUpdateTime().getNowDiffMinutes() > 5)
+                            StateSubscriptions.instance.updateSubscriptionFeed(it, false);
+                    }
                 }
                 else
                     Logger.w(TAG, "Too many subscription requests required:\n${reqCountStr}");
             }
         }
 
+        Logger.i(TAG, "MainApp Started: Initialize [BackgroundWork]");
         val interval = Settings.instance.subscriptions.getSubscriptionsBackgroundIntervalMinutes();
         scheduleBackgroundWork(context, interval != 0, interval);
 
+        Logger.i(TAG, "MainApp Started: Initialize [AutoBackup]");
         if(!Settings.instance.backup.didAskAutoBackup && !Settings.instance.backup.shouldAutomaticBackup()) {
             StateAnnouncement.instance.registerAnnouncement("backup", "Set Automatic Backup", "Configure daily backups of your data to restore in case of catastrophic failure.", AnnouncementType.SESSION, null, null, "Configure", {
                 if(context is IWithResultLauncher && !Settings.instance.storage.isStorageMainValid(context)) {
@@ -514,6 +588,7 @@ class StateApp {
             }
         }
 
+        Logger.i(TAG, "MainApp Started: Initialize [Announcements]");
         instance.scopeOrNull?.launch(Dispatchers.IO) {
             try {
                 StateAnnouncement.instance.loadAnnouncements();
@@ -531,9 +606,52 @@ class StateApp {
             );
         }
 
-        StateAnnouncement.instance.registerDidYouKnow();
+        StateAnnouncement.instance.registerDefaultHandlerAnnouncement();
+        Logger.i(TAG, "MainApp Started: Finished");
 
+        StatePlaylists.instance.toMigrateCheck();
+
+        if(StateHistory.instance.shouldMigrateLegacyHistory())
+            StateHistory.instance.migrateLegacyHistory();
+
+        StateAnnouncement.instance.deleteAnnouncement("plugin-update")
+
+        scopeOrNull?.launch(Dispatchers.IO) {
+            val updateAvailable = StatePlugins.instance.checkForUpdates()
+
+            withContext(Dispatchers.Main) {
+                if (updateAvailable.isNotEmpty()) {
+                    UIDialogs.appToast(
+                        ToastView.Toast(updateAvailable
+                            .map { " - " + it.first.name }
+                            .joinToString("\n"),
+                            true,
+                            null,
+                            "Plugin updates available"
+                        ));
+
+                    for(update in updateAvailable)
+                        if(StatePlatform.instance.isClientEnabled(update.first.id))
+                            UIDialogs.showPluginUpdateDialog(context, update.first, update.second);
+                }
+            }
+        }
+
+        scopeOrNull?.launch(Dispatchers.IO) {
+            val enabledPlugins = StatePlatform.instance.getEnabledClients();
+            for(plugin in enabledPlugins) {
+                try {
+                    if(plugin is JSClient) {
+                        if(plugin.descriptor.appSettings.sync.enableHistorySync == true)
+                            StateHistory.instance.syncRemoteHistory(plugin);
+                    }
+                } catch (ex: Throwable) {
+                    Logger.e(TAG, "Failed to update remote history for ${plugin.name}", ex);
+                }
+            }
+        }
     }
+
     fun mainAppStartedWithExternalFiles(context: Context) {
         if(!Settings.instance.didFirstStart) {
             if(StateBackup.hasAutomaticBackup()) {
@@ -544,6 +662,20 @@ class StateApp {
             Settings.instance.didFirstStart = true;
             Settings.instance.save();
         }
+        /*
+        if(!Settings.instance.comments.didAskPolycentricDefault) {
+            UIDialogs.showDialog(context, R.drawable.neopass, "Default Comment Section", "Grayjay supports 2 comment sections, the Platform comments and Polycentric comments. You can easily toggle between them, but which would you like to be selected by default? This choice can be changed in settings.\n\nPolycentric is still under active development.", null, 1,
+                UIDialogs.Action("Polycentric", {
+                    Settings.instance.comments.didAskPolycentricDefault = true;
+                    Settings.instance.comments.defaultCommentSection = 0;
+                    Settings.instance.save();
+                }, UIDialogs.ActionStyle.PRIMARY, true),
+                UIDialogs.Action("Platform", {
+                    Settings.instance.comments.didAskPolycentricDefault = true;
+                    Settings.instance.comments.defaultCommentSection = 1;
+                    Settings.instance.save();
+                }, UIDialogs.ActionStyle.PRIMARY, true))
+        }*/
         if(Settings.instance.backup.shouldAutomaticBackup()) {
             try {
                 StateBackup.startAutomaticBackup();
@@ -559,41 +691,64 @@ class StateApp {
 
 
     fun scheduleBackgroundWork(context: Context, active: Boolean = true, intervalMinutes: Int = 60 * 12) {
-        val wm = WorkManager.getInstance(context);
+        try {
+            val wm = WorkManager.getInstance(context);
 
-        if(active) {
-            if(BuildConfig.DEBUG)
-                UIDialogs.toast(context, "Scheduling background every ${intervalMinutes} minutes");
+            if(active) {
+                if(BuildConfig.DEBUG)
+                    UIDialogs.toast(context, "Scheduling background every ${intervalMinutes} minutes");
 
-            val req = PeriodicWorkRequest.Builder(BackgroundWorker::class.java, intervalMinutes.toLong(), TimeUnit.MINUTES, 5, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.UNMETERED)
-                    .build())
-                .build();
-            wm.enqueueUniquePeriodicWork("backgroundSubscriptions", ExistingPeriodicWorkPolicy.UPDATE, req);
+                val req = PeriodicWorkRequest.Builder(BackgroundWorker::class.java, intervalMinutes.toLong(), TimeUnit.MINUTES, 5, TimeUnit.MINUTES)
+                    .setConstraints(Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.UNMETERED)
+                        .build())
+                    .build();
+                wm.enqueueUniquePeriodicWork("backgroundSubscriptions", ExistingPeriodicWorkPolicy.UPDATE, req);
+            }
+            else
+                wm.cancelAllWork();
+        } catch (e: Throwable) {
+            Logger.e(TAG, "Failed to schedule background subscription updates.", e)
+            UIDialogs.toast(context, "Background subscription update failed: " + e.message)
         }
-        else
-            wm.cancelAllWork();
     }
 
 
-    private fun migrateStores(context: Context, managedStores: List<ManagedStore<*>>, index: Int) {
+    private suspend fun migrateStores(context: Context, managedStores: List<ManagedStore<*>>, index: Int) {
         if(managedStores.size <= index)
             return;
         val store = managedStores[index];
-        if(store.hasMissingReconstructions())
-            UIDialogs.showMigrateDialog(context, store) {
-                migrateStores(context, managedStores, index + 1);
-            };
-        else
+        if(store.hasMissingReconstructions()) {
+            withContext(Dispatchers.Main) {
+                try {
+                    UIDialogs.showMigrateDialog(context, store) {
+                        scopeOrNull?.launch(Dispatchers.IO) {
+                            try {
+                                migrateStores(context, managedStores, index + 1);
+                            } catch (e: Throwable) {
+                                Logger.e(TAG, "Failed to migrate store", e)
+                            }
+                        }
+                    }
+                } catch (e: Throwable) {
+                    Logger.e(TAG, "Failed to migrate stores", e)
+                }
+            }
+        } else
             migrateStores(context, managedStores, index + 1);
     }
 
-    fun mainAppDestroyed(context: Context) {
+    fun mainAppDestroyed(context: Context, mainId: String? = null) {
+        if (mainId != null && (_mainId != mainId || _mainId == null))
+            return
         Logger.i(TAG, "App ended");
         _receiverBecomingNoisy?.let {
             _receiverBecomingNoisy = null;
-            context.unregisterReceiver(it);
+            try {
+                context.unregisterReceiver(it);
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to unregister receiver.", e)
+            }
         }
 
         Logger.i(TAG, "Unregistered network callback on connectivityManager.")
@@ -601,6 +756,7 @@ class StateApp {
 
         StatePlayer.instance.closeMediaSession();
         StateCasting.instance.stop();
+        StateSync.instance.stop();
         StatePlayer.dispose();
         Companion.dispose();
         _fileLogConsumer?.close();
@@ -608,7 +764,8 @@ class StateApp {
 
     fun dispose(){
         _context = null;
-        _scope = null;
+        // _scope = null;
+        Logger.w(TAG, "StateApp disposed: ${Log.getStackTraceString(Throwable())}")
     }
 
     private val _connectivityEvents = object : ConnectivityManager.NetworkCallback() {
@@ -720,7 +877,6 @@ class StateApp {
                                 StatePlatform.instance.reloadClient(context, client.config.id);
                             } catch (e: Throwable) {
                                 Logger.e(SourceDetailFragment.TAG, "Failed to reload client.", e)
-                                return@launch;
                             }
                         }
                     }
@@ -729,6 +885,34 @@ class StateApp {
                 hasCaptchaDialog = false;
             })
         }
+    }
+
+    fun getLocaleContext(baseContext: Context?): Context? {
+        val locale = getLocaleSetting(baseContext);
+        try {
+
+            if (baseContext != null && locale != null) {
+                val config = baseContext.resources.configuration;
+                config.setLocale(locale);
+                return baseContext.createConfigurationContext(config);
+            }
+            return baseContext;
+        }
+        catch (ex: Throwable) {
+            Logger.e(TAG, "Failed to load locale", ex);
+            return baseContext;
+        }
+    }
+    fun getLocaleSetting(context: Context?): Locale? {
+        return context?.getSharedPreferences("language", Context.MODE_PRIVATE)
+                ?.getString("language", null)
+                ?.let { Locale(it) };
+    }
+    fun setLocaleSetting(context: Context?, locale: String?) {
+        context?.getSharedPreferences("language", Context.MODE_PRIVATE)
+            ?.edit()
+            ?.putString("language", locale)
+            ?.apply();
     }
 
     companion object {

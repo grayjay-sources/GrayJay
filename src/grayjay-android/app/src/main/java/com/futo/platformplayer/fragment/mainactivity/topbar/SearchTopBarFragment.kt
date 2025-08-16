@@ -13,19 +13,20 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
-import com.futo.platformplayer.logging.Logger
-import com.futo.platformplayer.stores.FragmentedStorage
 import com.futo.platformplayer.R
-import com.futo.platformplayer.stores.SearchHistoryStorage
 import com.futo.platformplayer.Settings
 import com.futo.platformplayer.UIDialogs
-import com.futo.platformplayer.api.media.PlatformID
 import com.futo.platformplayer.constructs.Event0
 import com.futo.platformplayer.constructs.Event1
-import com.futo.platformplayer.fragment.mainactivity.main.*
+import com.futo.platformplayer.fragment.mainactivity.main.SuggestionsFragment
+import com.futo.platformplayer.fragment.mainactivity.main.SuggestionsFragmentData
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.models.SearchType
+import com.futo.platformplayer.stores.FragmentedStorage
+import com.futo.platformplayer.stores.SearchHistoryStorage
 
 class SearchTopBarFragment : TopFragment() {
+    @Suppress("PrivatePropertyName")
     private val TAG = "SearchTopBarFragment"
 
     private var _editSearch: EditText? = null;
@@ -54,11 +55,12 @@ class SearchTopBarFragment : TopFragment() {
 
     private val _searchDoneListener = object : TextView.OnEditorActionListener {
         override fun onEditorAction(v: TextView?, actionId: Int, event: KeyEvent?): Boolean {
-            if (actionId != EditorInfo.IME_ACTION_DONE)
+            val isEnterPress = event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
+            if (actionId != EditorInfo.IME_ACTION_DONE && !isEnterPress)
                 return false
 
-            onDone();
-            return true;
+            onDone()
+            return true
         }
     };
 
@@ -86,7 +88,6 @@ class SearchTopBarFragment : TopFragment() {
         } else if (parameter is SuggestionsFragmentData) {
             this.setText(parameter.query);
             _searchType = parameter.searchType;
-            _channelUrl = parameter.channelUrl;
         }
 
         if(currentMain is SuggestionsFragment)
@@ -112,7 +113,7 @@ class SearchTopBarFragment : TopFragment() {
     fun clear() {
         _editSearch?.text?.clear();
         if (currentMain !is SuggestionsFragment) {
-            navigate<SuggestionsFragment>(SuggestionsFragmentData("", _searchType, _channelUrl), false);
+            navigate<SuggestionsFragment>(SuggestionsFragmentData("", _searchType), false);
         } else {
             onSearch.emit("");
         }
@@ -190,29 +191,32 @@ class SearchTopBarFragment : TopFragment() {
     }
 
     private fun onDone() {
-        val editSearch = _editSearch;
+        val editSearch = _editSearch
         if (editSearch != null) {
-            val text = editSearch.text.toString();
-            if (text.length < 3) {
-                UIDialogs.toast(getString(R.string.please_use_at_least_3_characters));
-                return;
+            val text = editSearch.text.toString()
+            if (text.isEmpty()) {
+                UIDialogs.toast(getString(R.string.please_use_at_least_1_character))
+                return
             }
 
-            editSearch.clearFocus();
-            _inputMethodManager?.hideSoftInputFromWindow(editSearch.windowToken, 0);
+            editSearch.clearFocus()
+            _inputMethodManager?.hideSoftInputFromWindow(editSearch.windowToken, 0)
 
             if (Settings.instance.search.searchHistory) {
-                val storage = FragmentedStorage.get<SearchHistoryStorage>();
-                storage.add(text);
+                val storage = FragmentedStorage.get<SearchHistoryStorage>()
+                storage.add(text)
             }
 
             if (_searchType == SearchType.CREATOR) {
-                onSearch.emit(text);
+                onSearch.emit(text)
             } else {
-                onSearch.emit(text);
+                onSearch.emit(text)
             }
         } else {
-            Logger.w(TAG, "Unexpected condition happened where done is edit search is null but done is triggered.");
+            Logger.w(
+                TAG,
+                "Unexpected condition happened where done is edit search is null but done is triggered."
+            )
         }
     }
 

@@ -7,8 +7,14 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!--<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>-->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions"/>
 
     <application
         android:allowBackup="true"
@@ -20,7 +26,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FutoVideo"
         android:usesCleartextTraffic="true"
-        tools:targetApi="31">
+        tools:targetApi="31"
+        android:largeHeap="true">
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="@string/authority"
@@ -29,24 +36,29 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver android:name=".receivers.MediaButtonReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <service android:name=".services.MediaPlaybackService"
             android:enabled="true"
             android:foregroundServiceType="mediaPlayback" />
         <service android:name=".services.DownloadService"
-            android:enabled="true" />
-        <service android:name=".services.ExportingService"
-            android:enabled="true" />
+            android:enabled="true"
+            android:foregroundServiceType="dataSync" />
 
         <receiver android:name=".receivers.MediaControlReceiver" />
         <receiver android:name=".receivers.AudioNoisyReceiver" />
+        <receiver android:name=".receivers.PlannedNotificationReceiver" />
 
         <activity
             android:name=".activities.MainActivity"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
             android:exported="true"
-            android:screenOrientation="portrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar"
-            android:launchMode="singleTask"
+            android:launchMode="singleInstance"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true">
 
@@ -57,6 +69,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="grayjay" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="fcast" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -131,34 +151,30 @@
                 <data android:scheme="polycentric" />
             </intent-filter>
         </activity>
-
         <activity
             android:name=".activities.TestActivity"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
-
         <activity
             android:name=".activities.SettingsActivity"
-            android:screenOrientation="portrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.DeveloperActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.ExceptionActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.CaptchaActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.LoginActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.AddSourceActivity"
-            android:screenOrientation="portrait"
             android:exported="true"
             android:theme="@style/Theme.FutoVideo.NoActionBar">
             <intent-filter>
@@ -172,40 +188,55 @@
         </activity>
         <activity
             android:name=".activities.AddSourceOptionsActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricHomeActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricBackupActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricCreateProfileActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricProfileActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricWhyActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.PolycentricImportProfileActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
         <activity
             android:name=".activities.ManageTabsActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
-
         <activity
             android:name=".activities.QRCaptureActivity"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorPortrait"
+            android:theme="@style/Theme.FutoVideo.NoActionBar" />
+        <activity
+            android:name=".activities.FCastGuideActivity"
+            android:screenOrientation="sensorPortrait"
+            android:theme="@style/Theme.FutoVideo.NoActionBar" />
+        <activity
+            android:name=".activities.SyncHomeActivity"
+            android:screenOrientation="sensorPortrait"
+            android:theme="@style/Theme.FutoVideo.NoActionBar" />
+        <activity
+            android:name=".activities.SyncPairActivity"
+            android:screenOrientation="sensorPortrait"
+            android:theme="@style/Theme.FutoVideo.NoActionBar" />
+        <activity
+            android:name=".activities.SyncShowPairingCodeActivity"
+            android:screenOrientation="sensorPortrait"
             android:theme="@style/Theme.FutoVideo.NoActionBar" />
     </application>
 </manifest>

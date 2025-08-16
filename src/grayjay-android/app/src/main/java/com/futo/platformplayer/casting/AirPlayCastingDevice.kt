@@ -1,13 +1,17 @@
 package com.futo.platformplayer.casting
 
 import android.os.Looper
-import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.api.http.ManagedHttpClient
-import com.futo.platformplayer.casting.models.FastCastSetVolumeMessage
 import com.futo.platformplayer.getConnectedSocket
+import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.models.CastingDeviceInfo
 import com.futo.platformplayer.toInetAddress
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.net.InetAddress
 import java.util.UUID
 
@@ -19,6 +23,7 @@ class AirPlayCastingDevice : CastingDevice {
     override var usedRemoteAddress: InetAddress? = null;
     override var localAddress: InetAddress? = null;
     override val canSetVolume: Boolean get() = false;
+    override val canSetSpeed: Boolean get() = true;
 
     var addresses: Array<InetAddress>? = null;
     var port: Int = 0;
@@ -44,14 +49,15 @@ class AirPlayCastingDevice : CastingDevice {
         return addresses?.toList() ?: listOf();
     }
 
-    override fun loadVideo(streamType: String, contentType: String, contentId: String, resumePosition: Double, duration: Double) {
-        if (invokeInIOScopeIfRequired({ loadVideo(streamType, contentType, contentId, resumePosition, duration) })) {
+    override fun loadVideo(streamType: String, contentType: String, contentId: String, resumePosition: Double, duration: Double, speed: Double?) {
+        if (invokeInIOScopeIfRequired({ loadVideo(streamType, contentType, contentId, resumePosition, duration, speed) })) {
             return;
         }
 
-        Logger.i(FastCastCastingDevice.TAG, "Start streaming (streamType: $streamType, contentType: $contentType, contentId: $contentId, resumePosition: $resumePosition, duration: $duration)");
+        Logger.i(FCastCastingDevice.TAG, "Start streaming (streamType: $streamType, contentType: $contentType, contentId: $contentId, resumePosition: $resumePosition, duration: $duration, speed: $speed)");
 
-        time = resumePosition;
+        setTime(resumePosition);
+        setDuration(duration);
         if (resumePosition > 0.0) {
             val pos = resumePosition / duration;
             Logger.i(TAG, "resumePosition: $resumePosition, duration: ${duration}, pos: $pos")
@@ -59,9 +65,13 @@ class AirPlayCastingDevice : CastingDevice {
         } else {
             post("play", "text/parameters", "Content-Location: $contentId\r\nStart-Position: 0");
         }
+
+        if (speed != null) {
+            changeSpeed(speed)
+        }
     }
 
-    override fun loadContent(contentType: String, content: String, resumePosition: Double, duration: Double) {
+    override fun loadContent(contentType: String, content: String, resumePosition: Double, duration: Double, speed: Double?) {
         throw NotImplementedError();
     }
 
@@ -128,7 +138,7 @@ class AirPlayCastingDevice : CastingDevice {
                     try {
                         val connectedSocket = getConnectedSocket(adrs.toList(), port);
                         if (connectedSocket == null) {
-                            delay(3000);
+                            delay(1000);
                             continue;
                         }
 
@@ -139,6 +149,7 @@ class AirPlayCastingDevice : CastingDevice {
                         break;
                     } catch (e: Throwable) {
                         Logger.w(TAG, "Failed to get setup initial connection to AirPlay device.", e)
+                        delay(1000);
                     }
                 }
 
@@ -153,16 +164,25 @@ class AirPlayCastingDevice : CastingDevice {
                         }
 
                         connectionState = CastConnectionState.CONNECTED;
-                        delay(1000);
 
                         val progressIndex = progressInfo.lowercase().indexOf("position: ");
                         if (progressIndex == -1) {
+                            delay(1000);
                             continue;
                         }
 
                         val progress = progressInfo.substring(progressIndex + "position: ".length).toDoubleOrNull() ?: continue;
+                        setTime(progress);
 
-                        time = progress;
+                        val durationIndex = progressInfo.lowercase().indexOf("duration: ");
+                        if (durationIndex == -1) {
+                            delay(1000);
+                            continue;
+                        }
+
+                        val duration = progressInfo.substring(durationIndex + "duration: ".length).toDoubleOrNull() ?: continue;
+                        setDuration(duration);
+                        delay(1000);
                     } catch (e: Throwable) {
                         Logger.w(TAG, "Failed to get server info from AirPlay device.", e)
                     }
@@ -184,6 +204,11 @@ class AirPlayCastingDevice : CastingDevice {
         _started = false;
         _scopeIO?.cancel();
         _scopeIO = null;
+    }
+
+    override fun changeSpeed(speed: Double) {
+        setSpeed(speed)
+        post("rate?value=$speed")
     }
 
     override fun getDeviceInfo(): CastingDeviceInfo {

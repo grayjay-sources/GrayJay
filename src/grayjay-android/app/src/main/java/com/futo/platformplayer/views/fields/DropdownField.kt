@@ -3,9 +3,14 @@ package com.futo.platformplayer.views.fields
 import android.content.Context
 import android.util.AttributeSet
 import android.view.View
-import android.widget.*
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
+import android.widget.TableRow
+import android.widget.TextView
 import com.futo.platformplayer.R
-import com.futo.platformplayer.constructs.Event2
+import com.futo.platformplayer.constructs.Event3
+import com.futo.platformplayer.logging.Logger
 import java.lang.reflect.Field
 
 class DropdownField : TableRow, IField {
@@ -35,7 +40,14 @@ class DropdownField : TableRow, IField {
 
     override var reference: Any? = null;
 
-    override val onChanged = Event2<IField, Any>();
+    override var isAdvanced: Boolean = false;
+
+    override val onChanged = Event3<IField, Any, Any>();
+
+    override val value: Any? get() = _selected;
+
+    override val searchContent: String?
+        get() = "${_title.text} ${_description.text}";
 
     constructor(context: Context, attrs: AttributeSet? = null) : super(context, attrs){
         inflate(context, R.layout.field_dropdown, this);
@@ -50,11 +62,19 @@ class DropdownField : TableRow, IField {
                     _isInitFire = false;
                     return;
                 }
+                Logger.i("DropdownField", "Changed: ${_selected} -> ${pos}");
+                val old = _selected;
                 _selected = pos;
-                onChanged.emit(this@DropdownField, pos);
+                onChanged.emit(this@DropdownField, pos, old);
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         };
+    }
+
+    override fun setValue(value: Any) {
+        if(value is Int) {
+            _spinner.setSelection(value);
+        }
     }
 
     fun asBoolean(name: String, description: String?, obj: Boolean) : DropdownField {
@@ -77,7 +97,24 @@ class DropdownField : TableRow, IField {
         return this;
     }
 
-    override fun fromField(obj: Any, field: Field, formField: FormField?) : DropdownField {
+    fun withValue(title: String, description: String?, options: List<String>, value: Int): DropdownField {
+        _title.text = title;
+        _description.visibility = if(description.isNullOrEmpty()) View.GONE else View.VISIBLE;
+        _description.text = description ?: "";
+
+        _options = options.toTypedArray();
+        _spinner.adapter = ArrayAdapter<String>(context, R.layout.spinner_item_simple, _options).also {
+            it.setDropDownViewResource(R.layout.spinner_dropdownitem_simple);
+        };
+
+        _selected = value;
+        _spinner.isSelected = false;
+        _spinner.setSelection(_selected, true);
+
+        return this;
+    }
+
+    override fun fromField(obj: Any, field: Field, formField: FormField?, advanced: Boolean) : DropdownField {
         this._field = field;
         this._obj = obj;
 
@@ -98,26 +135,28 @@ class DropdownField : TableRow, IField {
             _description.visibility = View.GONE;
         }
 
+        val advancedFieldAttr = field.getAnnotation(AdvancedField::class.java)
+        if(advancedFieldAttr != null || advanced)
+            isAdvanced = true;
 
         _options = (field.getAnnotation(DropdownFieldOptions::class.java)?.options ?:
             field.getAnnotation(DropdownFieldOptionsId::class.java)?.optionsId?.let { resources.getStringArray(it) } ?:
             arrayOf("Unset"))
             .toList().toTypedArray();
 
-        if(_options != null){
-            _spinner.adapter = ArrayAdapter<String>(context, R.layout.spinner_item_simple, _options).also {
-                it.setDropDownViewResource(R.layout.spinner_dropdownitem_simple);
-            };
+        _spinner.adapter = ArrayAdapter(context, R.layout.spinner_item_simple, _options).also {
+            it.setDropDownViewResource(R.layout.spinner_dropdownitem_simple);
+        };
 
-            if(field.type == Int::class.java)
-                _selected = field.get(obj) as Int;
-            else {
-                val valStr = field.get(obj)?.toString();
-                _selected = if (_options.contains(valStr)) _options.indexOf(valStr) else 0;
-            }
-            _spinner.isSelected = false;
-            _spinner.setSelection(_selected, true);
+        _selected = if(field.type == Int::class.java) {
+            field.get(obj) as Int;
+        } else {
+            val valStr = field.get(obj)?.toString();
+            if (_options.contains(valStr)) _options.indexOf(valStr) else 0;
         }
+
+        _spinner.isSelected = false;
+        _spinner.setSelection(_selected, true);
         return this;
     }
     override fun setField() {

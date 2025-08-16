@@ -13,13 +13,17 @@ class PlatformClientPool {
     private val _pool: HashMap<JSClient, Int> = hashMapOf();
     private var _poolCounter = 0;
     private val _poolName: String?;
+    private val _privatePool: Boolean;
+    private val _isolatedInitialization: Boolean
 
     var isDead: Boolean = false
         private set;
     val onDead = Event2<JSClient, PlatformClientPool>();
 
-    constructor(parentClient: IPlatformClient, name: String? = null) {
+    constructor(parentClient: IPlatformClient, name: String? = null, privatePool: Boolean = false, isolatedInitialization: Boolean = false) {
         _poolName = name;
+        _privatePool = privatePool;
+        _isolatedInitialization = isolatedInitialization
         if(parentClient !is JSClient)
             throw IllegalArgumentException("Pooling only supported for JSClients right now");
         Logger.i(TAG, "Pool for ${parentClient.name} was started");
@@ -30,8 +34,10 @@ class PlatformClientPool {
             isDead = true;
             onDead.emit(parentClient, this);
 
-            for(clientPair in _pool) {
-                clientPair.key.disable();
+            synchronized(_pool) {
+                for (clientPair in _pool) {
+                    clientPair.key.disable();
+                }
             }
         };
     }
@@ -51,7 +57,7 @@ class PlatformClientPool {
             reserved = _pool.keys.find { !it.isBusy };
             if(reserved == null && _pool.size < capacity) {
                 Logger.i(TAG, "Started additional [${_parent.name}] client in pool [${_poolName}] (${_pool.size + 1}/${capacity})");
-                reserved = _parent.getCopy();
+                reserved = _parent.getCopy(_privatePool, _isolatedInitialization);
 
                 reserved?.onCaptchaException?.subscribe { client, ex ->
                     StateApp.instance.handleCaptchaException(client, ex);

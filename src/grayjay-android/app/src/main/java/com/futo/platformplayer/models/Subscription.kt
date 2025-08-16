@@ -4,7 +4,6 @@ import com.futo.platformplayer.api.media.models.ResultCapabilities
 import com.futo.platformplayer.api.media.models.channels.IPlatformChannel
 import com.futo.platformplayer.api.media.models.channels.SerializedChannel
 import com.futo.platformplayer.api.media.models.contents.IPlatformContent
-import com.futo.platformplayer.api.media.models.contents.IPlatformContentDetails
 import com.futo.platformplayer.getNowDiffDays
 import com.futo.platformplayer.logging.Logger
 import com.futo.platformplayer.serializers.OffsetDateTimeSerializer
@@ -15,6 +14,9 @@ import java.time.OffsetDateTime
 @kotlinx.serialization.Serializable
 class Subscription {
     var channel: SerializedChannel;
+
+    @kotlinx.serialization.Serializable(with = OffsetDateTimeSerializer::class)
+    var creationTime: OffsetDateTime = OffsetDateTime.MIN;
 
     //Settings
     var doNotifications: Boolean = false;
@@ -41,6 +43,9 @@ class Subscription {
     @kotlinx.serialization.Serializable(with = OffsetDateTimeSerializer::class)
     var lastPostUpdate : OffsetDateTime = OffsetDateTime.MIN;
 
+    @kotlinx.serialization.Serializable(with = OffsetDateTimeSerializer::class)
+    var lastPeekVideo : OffsetDateTime = OffsetDateTime.MIN;
+
     //Last video interval
     var uploadInterval : Int = 0;
     var uploadStreamInterval : Int = 0;
@@ -49,9 +54,16 @@ class Subscription {
     var playbackSeconds: Int = 0;
     var playbackViews: Int = 0;
 
+    var isOther = false;
 
     constructor(channel : SerializedChannel) {
         this.channel = channel;
+        if(this.creationTime == OffsetDateTime.MIN)
+            this.creationTime = OffsetDateTime.now();
+    }
+
+    fun isChannel(url: String): Boolean {
+        return channel.url == url || channel.urlAlternatives.contains(url);
     }
 
     fun shouldFetchVideos() = doFetchVideos &&
@@ -64,17 +76,23 @@ class Subscription {
     fun getClient() = StatePlatform.instance.getChannelClientOrNull(channel.url);
 
     fun save() {
-        StateSubscriptions.instance.saveSubscription(this);
+        if(isOther)
+            StateSubscriptions.instance.saveSubscriptionOther(this);
+        else
+            StateSubscriptions.instance.saveSubscription(this);
     }
     fun saveAsync() {
-        StateSubscriptions.instance.saveSubscription(this);
+        if(isOther)
+            StateSubscriptions.instance.saveSubscriptionOtherAsync(this);
+        else
+            StateSubscriptions.instance.saveSubscriptionAsync(this);
     }
 
     fun updateChannel(channel: IPlatformChannel) {
         this.channel = SerializedChannel.fromChannel(channel);
     }
 
-    fun updatePlayback(content: IPlatformContentDetails, seconds: Int) {
+    fun updatePlayback(seconds: Int) {
         playbackSeconds += seconds;
     }
     fun addPlaybackView() {
@@ -116,8 +134,18 @@ class Subscription {
                 else if(lastVideo.year > 3000)
                     lastVideo = OffsetDateTime.MIN;
                 lastVideoUpdate = OffsetDateTime.now();
+                lastPeekVideo = OffsetDateTime.MIN;
             }
             ResultCapabilities.TYPE_MIXED -> {
+                uploadInterval = interval;
+                if(mostRecent != null)
+                    lastVideo = mostRecent;
+                else if(lastVideo.year > 3000)
+                    lastVideo = OffsetDateTime.MIN;
+                lastVideoUpdate = OffsetDateTime.now();
+                lastPeekVideo = OffsetDateTime.MIN;
+            }
+            ResultCapabilities.TYPE_SUBSCRIPTIONS -> {
                 uploadInterval = interval;
                 if(mostRecent != null)
                     lastVideo = mostRecent;

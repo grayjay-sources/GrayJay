@@ -1,8 +1,12 @@
 package com.futo.platformplayer.api.http
 
+import androidx.collection.arrayMapOf
+import com.futo.platformplayer.SettingsDev
 import com.futo.platformplayer.constructs.Event1
 import com.futo.platformplayer.ensureNotMainThread
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.stores.FragmentedStorage
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -13,12 +17,16 @@ import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import java.util.Dictionary
-import java.util.concurrent.TimeUnit
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import java.time.Duration
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import kotlin.system.measureTimeMillis
 
 open class ManagedHttpClient {
-    protected val _builderTemplate: OkHttpClient.Builder;
+    protected var _builderTemplate: OkHttpClient.Builder;
 
     private var client: OkHttpClient;
 
@@ -27,9 +35,48 @@ open class ManagedHttpClient {
 
     var user_agent = "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"
 
+    fun setTimeout(timeout: Long) {
+        rebuildClient {
+            it.callTimeout(Duration.ofMillis(client.callTimeoutMillis.toLong()))
+                .writeTimeout(Duration.ofMillis(client.writeTimeoutMillis.toLong()))
+                .readTimeout(Duration.ofMillis(client.readTimeoutMillis.toLong()))
+                .connectTimeout(Duration.ofMillis(timeout));
+        }
+    }
+
+    private val trustAllCerts = arrayOf<TrustManager>(
+      object: X509TrustManager {
+          override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) { }
+          override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) { }
+          override fun getAcceptedIssuers(): Array<X509Certificate> {
+              return arrayOf();
+          }
+      }
+    );
+    private fun trustAllCertificates(builder: OkHttpClient.Builder) {
+        val sslContext = SSLContext.getInstance("SSL");
+        sslContext.init(null, trustAllCerts, SecureRandom());
+        builder.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager);
+        builder.hostnameVerifier { a, b ->
+            return@hostnameVerifier true;
+        }
+        Logger.w(TAG, "Creating INSECURE client (TrustAll)");
+    }
+
     constructor(builder: OkHttpClient.Builder = OkHttpClient.Builder()) {
         _builderTemplate = builder;
+        if(FragmentedStorage.isInitialized && StateApp.instance.isMainActive && SettingsDev.instance.developerMode && SettingsDev.instance.networking.allowAllCertificates)
+            trustAllCertificates(builder);
         client = builder.addNetworkInterceptor { chain ->
+            val request = beforeRequest(chain.request());
+            val response = afterRequest(chain.proceed(request));
+            return@addNetworkInterceptor response;
+        }.build();
+    }
+
+    fun rebuildClient(modify: (OkHttpClient.Builder) -> OkHttpClient.Builder) {
+        _builderTemplate = modify(_builderTemplate);
+        client = _builderTemplate.addNetworkInterceptor { chain ->
             val request = beforeRequest(chain.request());
             val response = afterRequest(chain.proceed(request));
             return@addNetworkInterceptor response;
@@ -43,6 +90,7 @@ open class ManagedHttpClient {
     }
 
     fun tryHead(url: String): Map<String, String>? {
+        ensureNotMainThread()
         try {
             val result = head(url);
             if(result.isOk)
@@ -57,10 +105,10 @@ open class ManagedHttpClient {
     }
 
     fun socket(url: String, headers: MutableMap<String, String> = HashMap(), listener: SocketListener): Socket {
-
+        ensureNotMainThread()
         val requestBuilder: okhttp3.Request.Builder = okhttp3.Request.Builder()
             .url(url);
-        if(user_agent != null && !user_agent.isEmpty() && !headers.any { it.key.lowercase() == "user-agent" })
+        if(user_agent.isNotEmpty() && !headers.any { it.key.lowercase() == "user-agent" })
             requestBuilder.addHeader("User-Agent", user_agent)
 
         for (pair in headers.entries)
@@ -137,7 +185,7 @@ open class ManagedHttpClient {
         val requestBuilder: okhttp3.Request.Builder = okhttp3.Request.Builder()
             .method(request.method, requestBody)
             .url(request.url);
-        if(user_agent != null && !user_agent.isEmpty() && !request.headers.any { it.key.lowercase() == "user-agent" })
+        if(user_agent.isNotEmpty() && !request.headers.any { it.key.lowercase() == "user-agent" })
             requestBuilder.addHeader("User-Agent", user_agent)
 
         for (pair in request.headers.entries)
@@ -148,7 +196,7 @@ open class ManagedHttpClient {
 
         val time = measureTimeMillis {
             val call = client.newCall(requestBuilder.build());
-            request.onCallCreated?.emit(call);
+            request.onCallCreated.emit(call);
             response = call.execute()
             resp = Response(
                 response.code,
@@ -253,6 +301,7 @@ open class ManagedHttpClient {
         }
 
         fun send(msg: String) {
+            ensureNotMainThread()
             socket.send(msg);
         }
 

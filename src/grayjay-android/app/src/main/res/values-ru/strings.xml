@@ -252,8 +252,6 @@
     <string name="announcement">Объявление</string>
     <string name="attempt_to_utilize_byte_ranges">Попытка использовать диапазоны байт</string>
     <string name="auto_update">Автообновление</string>
-    <string name="auto_rotate">Автоповорот</string>
-    <string name="auto_rotate_dead_zone">Мертвая зона автоповорота</string>
     <string name="automatic_backup">Автоматическое резервное копирование</string>
     <string name="background_behavior">Поведение в фоновом режиме</string>
     <string name="background_update">Фоновое обновление</string>
@@ -558,7 +556,6 @@
     <string name="not_yet_available_retrying_in_time_s">Ещё недоступно, повторная попытка через {time}с</string>
     <string name="failed_to_retry_for_live_stream">Не удалось повторить попытку для прямого эфира</string>
     <string name="this_app_is_in_development_please_submit_bug_reports_and_understand_that_many_features_are_incomplete">Это приложение находится в стадии разработки. Пожалуйста, отправляйте сообщения об ошибках и поймите, что многие функции незавершены.</string>
-    <string name="please_use_at_least_3_characters">Пожалуйста, используйте хотя бы 3 символа</string>
     <string name="are_you_sure_you_want_to_delete_this_video">Вы уверены, что хотите удалить это видео?</string>
     <string name="tap_to_open">Нажмите, чтобы открыть</string>
     <string name="watching">Смотрят</string>
@@ -661,11 +658,6 @@
         <item>При запуске</item>
         <item>Никогда</item>
     </string-array>
-    <string-array name="system_enabled_disabled_array">
-        <item>Отключено</item>
-        <item>Включено</item>
-        <item>Как в системе</item>
-    </string-array>
     <string-array name="enabled_disabled_array">
         <item>Отключено</item>
         <item>Включено</item>
@@ -680,8 +672,12 @@
         <item>Включено</item>
     </string-array>
     <string-array name="subscriptions_sortby_array">
-        <item>Имя по возрастанию</item>
-        <item>Имя по убыванию</item>
+        <item>По имени по возрастанию</item>
+        <item>По имени по убыванию</item>
+        <item>По количеству просмотров по возрастанию</item>
+        <item>По количеству просмотров по убыванию</item>
+        <item>По времени просмотра по возрастанию</item>
+        <item>По времени просмотра по убыванию</item>
     </string-array>
     <string-array name="feed_style">
         <item>Предпросмотр</item>
@@ -697,25 +693,15 @@
         <item>Продолжить после 10 секунд</item>
         <item>Всегда продолжать</item>
     </string-array>
-    <string-array name="languages">
-        <item>Английский</item>
-        <item>Испанский</item>
-        <item>Французский</item>
-        <item>Французский</item>
-        <item>Корейский</item>
-        <item>Тайский</item>
-        <item>Вьетнамский</item>
-        <item>Индонезийский</item>
-        <item>Хинди</item>
-        <item>Арабский</item>
-        <item>Турецкий</item>
-        <item>Русский</item>
-    </string-array>
     <string-array name="log_levels">
         <item>Нет</item>
         <item>Ошибка</item>
         <item>Предупреждение</item>
         <item>Информация</item>
         <item>Подробно</item>
+    </string-array>
+    <string-array name="comments_sortby_array">
+        <item>Newest</item>
+        <item>Oldest</item>
     </string-array>
 </resources>

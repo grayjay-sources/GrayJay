@@ -2,10 +2,19 @@ package com.futo.platformplayer.api.media.platforms.js
 
 import com.futo.platformplayer.R
 import com.futo.platformplayer.constructs.Event0
-import com.futo.platformplayer.serializers.FlexibleBooleanSerializer
+import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.states.AnnouncementType
+import com.futo.platformplayer.states.StateAnnouncement
+import com.futo.platformplayer.states.StateApp
+import com.futo.platformplayer.states.StateHistory
+import com.futo.platformplayer.states.StatePlatform
 import com.futo.platformplayer.views.fields.DropdownFieldOptions
 import com.futo.platformplayer.views.fields.FieldForm
 import com.futo.platformplayer.views.fields.FormField
+import com.futo.platformplayer.views.fields.FormFieldButton
+import com.futo.platformplayer.views.fields.FormFieldWarning
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -27,17 +36,19 @@ class SourcePluginDescriptor {
     @kotlinx.serialization.Transient
     val onCaptchaChanged = Event0();
 
-    constructor(config :SourcePluginConfig, authEncrypted: String? = null, captchaEncrypted: String? = null) {
+    constructor(config :SourcePluginConfig, authEncrypted: String? = null, captchaEncrypted: String? = null, settings: HashMap<String, String?>? = null) {
         this.config = config;
         this.authEncrypted = authEncrypted;
         this.captchaEncrypted = captchaEncrypted;
         this.flags = listOf();
+        this.settings = settings ?: hashMapOf();
     }
-    constructor(config :SourcePluginConfig, authEncrypted: String? = null, captchaEncrypted: String? = null, flags: List<String>) {
+    constructor(config :SourcePluginConfig, authEncrypted: String? = null, captchaEncrypted: String? = null, flags: List<String>,  settings: HashMap<String, String?>? = null) {
         this.config = config;
         this.authEncrypted = authEncrypted;
         this.captchaEncrypted = captchaEncrypted;
         this.flags = flags;
+        this.settings = settings ?: hashMapOf();
     }
 
     fun getSettingsWithDefaults(): HashMap<String, String?> {
@@ -54,7 +65,16 @@ class SourcePluginDescriptor {
         onCaptchaChanged.emit();
     }
     fun getCaptchaData(): SourceCaptchaData? {
-        return SourceCaptchaData.fromEncrypted(captchaEncrypted);
+        try {
+            return SourceCaptchaData.fromEncrypted(captchaEncrypted);
+        }
+        catch(ex: Throwable) {
+            Logger.e("SourcePluginDescriptor", "Captcha decode failed, disabling auth.", ex);
+            StateAnnouncement.instance.registerAnnouncement("CAP_BROKEN_" + config.id,
+                "Captcha corrupted for plugin [${config.name}]",
+                "Something went wrong in the stored captcha, you'll have to login again", AnnouncementType.SESSION);
+            return null;
+        }
     }
 
     fun updateAuth(str: SourceAuth?) {
@@ -62,11 +82,25 @@ class SourcePluginDescriptor {
         onAuthChanged.emit();
     }
     fun getAuth(): SourceAuth? {
-        return SourceAuth.fromEncrypted(authEncrypted);
+        try {
+            return SourceAuth.fromEncrypted(authEncrypted);
+        }
+        catch(ex: Throwable) {
+            Logger.e("SourcePluginDescriptor", "Authentication decode failed, disabling auth.", ex);
+            StateAnnouncement.instance.registerAnnouncement("AUTH_BROKEN_" + config.id,
+                "Authentication corrupted for plugin [${config.name}]",
+                "Something went wrong in the stored authentication, you'll have to login again", AnnouncementType.SESSION);
+            return null;
+        }
     }
 
     @Serializable
     class AppPluginSettings {
+
+        @FormField(R.string.check_for_updates_setting, FieldForm.TOGGLE, R.string.check_for_updates_setting_description, -1)
+        var checkForUpdates: Boolean = true;
+        @FormField(R.string.automatic_update_setting, FieldForm.TOGGLE, R.string.automatic_update_setting_description, 0)
+        var automaticUpdate: Boolean = false;
 
         @FormField(R.string.visibility, "group", R.string.enable_where_this_plugins_content_are_visible, 2)
         var tabEnabled = TabEnabled();
@@ -75,12 +109,22 @@ class SourcePluginDescriptor {
             @FormField(R.string.home, FieldForm.TOGGLE, R.string.show_content_in_home_tab, 1)
             var enableHome: Boolean? = null;
 
-
             @FormField(R.string.search, FieldForm.TOGGLE, R.string.show_content_in_search_results, 2)
             var enableSearch: Boolean? = null;
+
+            @FormField(R.string.shorts, FieldForm.TOGGLE, R.string.show_content_in_shorts_tab, 3)
+            var enableShorts: Boolean? = null;
         }
 
-        @FormField(R.string.ratelimit, "group", R.string.ratelimit_description, 3)
+        @FormField(R.string.sync, "group", R.string.sync_desc, 3,"sync")
+        var sync = Sync();
+        @Serializable
+        class Sync {
+            @FormField(R.string.sync_history, FieldForm.TOGGLE, R.string.sync_history_desc, 1,"syncHistory")
+            var enableHistorySync: Boolean? = null;
+        }
+
+        @FormField(R.string.ratelimit, "group", R.string.ratelimit_description, 4)
         var rateLimit = RateLimit();
         @Serializable
         class RateLimit {
@@ -105,11 +149,18 @@ class SourcePluginDescriptor {
         }
 
 
+
+        @FormField(R.string.allow_developer_submit, FieldForm.TOGGLE, R.string.allow_developer_submit_description, 1, "devSubmit")
+        var allowDeveloperSubmit: Boolean = false;
+
+
         fun loadDefaults(config: SourcePluginConfig) {
             if(tabEnabled.enableHome == null)
-                tabEnabled.enableHome = config.enableInHome ?: true;
+                tabEnabled.enableHome = config.enableInHome
             if(tabEnabled.enableSearch == null)
-                tabEnabled.enableSearch = config.enableInSearch ?: true;
+                tabEnabled.enableSearch = config.enableInSearch
+            if(tabEnabled.enableShorts == null)
+                tabEnabled.enableShorts = config.enableInShorts
         }
     }
 

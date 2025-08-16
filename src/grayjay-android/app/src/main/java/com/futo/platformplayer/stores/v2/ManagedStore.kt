@@ -2,6 +2,7 @@ package com.futo.platformplayer.stores.v2
 
 import com.futo.platformplayer.assume
 import com.futo.platformplayer.logging.Logger
+import com.futo.platformplayer.models.ImportCache
 import com.futo.platformplayer.states.StateApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -10,13 +11,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import java.io.File
 import java.io.FileNotFoundException
-import java.lang.Exception
-import java.util.*
-import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
+import java.util.UUID
 import kotlin.reflect.KClass
 import kotlin.reflect.KType
-import kotlin.reflect.javaType
 
 class ManagedStore<T>{
     private val _class: KType;
@@ -35,6 +32,9 @@ class ManagedStore<T>{
     private var _withUnique: ((T) -> Any)? = null;
 
     val className: String? get() = _class.classifier?.assume<KClass<*>>()?.simpleName;
+
+    private var _onModificationCreate: ((T) -> Unit)? = null;
+    private var _onModificationDelete: ((T) -> Unit)? = null;
 
     val name: String;
 
@@ -65,11 +65,16 @@ class ManagedStore<T>{
         return this;
     }
 
+    fun withOnModified(created: (T)->Unit, deleted: (T)->Unit): ManagedStore<T> {
+        _onModificationCreate = created;
+        _onModificationDelete = deleted;
+        return this;
+    }
+
     fun load(): ManagedStore<T> {
         synchronized(_files) {
             _files.clear();
-            val newObjs = _dir.listFiles().map { it.nameWithoutExtension }.distinct().toList().map { fileId ->
-                //Logger.i(TAG, "FILE:" + it.name);
+            val newObjs = _dir.listFiles()?.map { it.nameWithoutExtension }?.distinct()?.toList()?.map { fileId ->
                 val mfile = ManagedFile(fileId, _dir);
                 val obj = mfile.load(this, _withBackup);
                 if(obj == null) {
@@ -82,10 +87,12 @@ class ManagedStore<T>{
                 }
 
                 return@map Pair(obj, mfile);
-            }.filter { it.first != null };
+            }?.filter { it.first != null };
 
-            for (obj in newObjs)
-                _files.put(obj.first!!, obj.second);
+            if (newObjs != null) {
+                for (obj in newObjs)
+                    _files[obj.first!!] = obj.second;
+            }
         }
         _isLoaded = true;
         return this;
@@ -108,7 +115,7 @@ class ManagedStore<T>{
             _toReconstruct.clear();
         }
     }
-    suspend fun importReconstructions(items: List<String>, onProgress: ((Int, Int)->Unit)? = null): ReconstructionResult {
+    suspend fun importReconstructions(items: List<String>, cache: ImportCache? = null, onProgress: ((Int, Int)->Unit)? = null): ReconstructionResult {
         var successes = 0;
         val exs = ArrayList<Throwable>();
 
@@ -123,7 +130,7 @@ class ManagedStore<T>{
             for (i in 0 .. 1) {
                 try {
                     Logger.i(TAG, "Importing ${logName(recon)}");
-                    val reconId = createFromReconstruction(recon, builder);
+                    val reconId = createFromReconstruction(recon, builder, cache);
                     successes++;
                     Logger.i(TAG, "Imported ${logName(reconId)}");
                     break;
@@ -267,6 +274,7 @@ class ManagedStore<T>{
                 file = saveNew(obj);
                 if(_reconstructStore != null && (_reconstructStore!!.backupOnCreate || withReconstruction))
                     saveReconstruction(file, obj);
+                _onModificationCreate?.invoke(obj)
             }
         }
     }
@@ -275,12 +283,20 @@ class ManagedStore<T>{
             save(obj, withReconstruction, onlyExisting);
     }
 
-    suspend fun createFromReconstruction(reconstruction: String, builder: ReconstructStore.Builder): String {
+    suspend fun fromReconstruction(reconstruction: String, cache: ImportCache? = null): T {
         if(_reconstructStore == null)
             throw IllegalStateException("Can't reconstruct as no reconstruction is implemented for this type");
 
         val id = UUID.randomUUID().toString();
-        val reconstruct = _reconstructStore!!.toObjectWithHeader(id, reconstruction, builder);
+        return _reconstructStore!!.toObjectWithHeader(id, reconstruction, ReconstructStore.Builder(), cache);
+    }
+
+    suspend fun createFromReconstruction(reconstruction: String, builder: ReconstructStore.Builder, cache: ImportCache? = null): String {
+        if(_reconstructStore == null)
+            throw IllegalStateException("Can't reconstruct as no reconstruction is implemented for this type");
+
+        val id = UUID.randomUUID().toString();
+        val reconstruct = _reconstructStore!!.toObjectWithHeader(id, reconstruction, builder, cache);
         save(reconstruct);
         return id;
     }
@@ -294,6 +310,7 @@ class ManagedStore<T>{
                 _files.remove(item);
                 Logger.v(TAG, "Deleting file ${logName(file.id)}");
                 file.delete();
+                _onModificationDelete?.invoke(item)
             }
         }
     }
