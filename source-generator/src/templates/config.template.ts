@@ -35,7 +35,7 @@ export function generateConfigJson(config: SourceConfig): string {
     scriptUrl: './script.js',
     repositoryUrl: config.repositoryUrl,
     version: config.version || 1,
-    iconUrl: config.resolvedLogoUrl || '',
+    iconUrl: config.resolvedLogoUrl || 'https://grayjay.app/images/webclip.png',
     id: generateSimpleUUID(),
     scriptSignature: '',
     scriptPublicKey: '',

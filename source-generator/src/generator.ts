@@ -37,7 +37,7 @@ export class SourceGenerator {
     // Resolve logo URL first (before generating config)
     console.log('\n📷 Resolving logo URL...');
     const resolvedLogoUrl = await resolveLogoUrl(config.platformUrl, config.logoUrl);
-    this.options.config.resolvedLogoUrl = resolvedLogoUrl || undefined;
+    this.options.config.resolvedLogoUrl = resolvedLogoUrl;
 
     // Generate package.json
     await this.generatePackageJson();
@@ -94,9 +94,11 @@ export class SourceGenerator {
       main: 'dist/script.js',
       scripts: {
         build: 'rollup -c',
+        'build:publish': 'npm run build && npm run publish',
         dev: 'rollup -c -w',
         prettier: 'npx prettier --write ./src/**/*.ts',
-        'generate-qr': 'node scripts/generate-qr.js'
+        'generate-qr': 'node scripts/generate-qr.js',
+        publish: 'node scripts/publish.js'
       },
       engines: {
         node: '>=14',
@@ -304,6 +306,13 @@ export class SourceGenerator {
     await fs.writeFile(
       path.join(scriptsDir, 'generate-qr.js'),
       qrScript
+    );
+
+    // Generate publish script
+    const publishScript = await this.getRawTemplate('scripts/publish.js');
+    await fs.writeFile(
+      path.join(scriptsDir, 'publish.js'),
+      publishScript
     );
   }
 

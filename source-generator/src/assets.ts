@@ -110,22 +110,27 @@ async function findFaviconUrl(platformUrl: string): Promise<string | null> {
 /**
  * Resolve logo URL from custom URL or favicon detection
  * Returns the URL without downloading to avoid DMCA issues
+ * Falls back to GrayJay default logo if resolution fails
  */
 export async function resolveLogoUrl(
   platformUrl: string,
   customLogoUrl?: string
-): Promise<string | null> {
+): Promise<string> {
+  const DEFAULT_LOGO_URL = 'https://grayjay.app/images/webclip.png';
+  
   try {
-    if (customLogoUrl) {
+    // If custom URL is empty string or whitespace, use default
+    if (customLogoUrl && customLogoUrl.trim()) {
       console.log(`✅ Using provided logo URL: ${customLogoUrl}`);
       return customLogoUrl;
     }
     
+    // Try to find favicon from platform
     const faviconUrl = await findFaviconUrl(platformUrl);
     
     if (!faviconUrl) {
-      console.log('❌ No favicon found');
-      return null;
+      console.log(`ℹ️  No favicon found, using GrayJay default logo`);
+      return DEFAULT_LOGO_URL;
     }
     
     console.log(`✅ Resolved logo URL: ${faviconUrl}`);
@@ -133,6 +138,7 @@ export async function resolveLogoUrl(
     
   } catch (error) {
     console.warn(`⚠️  Failed to resolve logo URL: ${error}`);
-    return null;
+    console.log(`ℹ️  Using GrayJay default logo`);
+    return DEFAULT_LOGO_URL;
   }
 }

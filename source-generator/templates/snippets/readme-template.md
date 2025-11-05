@@ -58,6 +58,14 @@ npm run build
 
 This will generate the minified plugin files in the `dist/` directory.
 
+### Build and Publish
+
+```bash
+npm run build:publish [version]
+```
+
+This will build the plugin and trigger a GitHub release. Requires `GITHUB_TOKEN` environment variable.
+
 ### Development Mode
 
 ```bash
@@ -114,12 +122,29 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Releases
 
-New versions are released through GitHub Actions. To create a new release:
+### Automated Publishing (Recommended)
+
+```bash
+# Set your GitHub token once
+export GITHUB_TOKEN=your_github_personal_access_token
+
+# Build and publish a new version
+npm run build:publish [version]
+```
+
+The script will:
+1. Build the plugin with `npm run build`
+2. Trigger the GitHub release workflow with the specified version
+3. The workflow will update config.json, build, generate QR code, and create a release
+
+### Manual Publishing
 
 1. Go to Actions → Release Plugin
 2. Click "Run workflow"
 3. Enter the new version number
 4. The workflow will build, update the version, generate QR code, and create a GitHub release
+
+**Note:** Get a GitHub Personal Access Token at https://github.com/settings/tokens with `repo` permissions.
 
 ## Support
 
