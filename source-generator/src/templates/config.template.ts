@@ -8,7 +8,19 @@ function generateSimpleUUID(): string {
   });
 }
 
+function getGitHubUsername(repoUrl: string): string {
+  const match = repoUrl.match(/github\.com\/([^\/]+)/);
+  return match ? match[1] : 'username';
+}
+
+function getRepoName(repoUrl: string): string {
+  const match = repoUrl.match(/github\.com\/[^\/]+\/([^\/]+)/);
+  return match ? match[1].replace(/\.git$/, '') : 'repo';
+}
+
 export function generateConfigJson(config: SourceConfig): string {
+  const githubUser = getGitHubUsername(config.repositoryUrl);
+  const repoName = getRepoName(config.repositoryUrl);
   const packageNames: string[] = ['Http'];
   
   if (config.uses.includes('html') || config.uses.includes('webscraping')) {
@@ -21,11 +33,11 @@ export function generateConfigJson(config: SourceConfig): string {
     description: config.description,
     author: config.author,
     authorUrl: config.authorUrl || '',
-    sourceUrl: `${config.repositoryUrl}/config.json`,
-    scriptUrl: './Script.js',
+    sourceUrl: `${config.repositoryUrl}/releases/latest/download/config.json`,
+    scriptUrl: './script.js',
     repositoryUrl: config.repositoryUrl,
     version: config.version || 1,
-    iconUrl: './assets/icon.png',
+    iconUrl: `${config.repositoryUrl}/raw/main/assets/logo.png`,
     id: generateSimpleUUID(),
     scriptSignature: '',
     scriptPublicKey: '',
@@ -62,9 +74,4 @@ export function generateConfigJson(config: SourceConfig): string {
   };
 
   return JSON.stringify(configObj, null, 2);
-}
-
-// Alias for backward compatibility
-export function generateConfigJsonSimple(config: SourceConfig): string {
-  return generateConfigJson(config);
 }

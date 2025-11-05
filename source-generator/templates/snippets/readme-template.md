@@ -4,11 +4,22 @@
 
 ## Installation
 
-Scan this QR code with the GrayJay app to install the plugin:
+### Quick Install
 
-![QR Code]({{QR_PATH}})
+Click this link to install in GrayJay:
 
-Or click [here]({{REPOSITORY_URL}}) to install manually.
+**[Install Plugin](grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json)**
+
+Or use this URL:
+```
+grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json
+```
+
+### QR Code
+
+Scan this QR code with the GrayJay app:
+
+![QR Code](assets/qrcode.png)
 
 ## Features
 
@@ -44,7 +55,7 @@ npm install
 npm run build
 ```
 
-This will generate the plugin files in the `dist/` directory.
+This will generate the minified plugin files in the `dist/` directory.
 
 ### Development Mode
 
@@ -63,12 +74,11 @@ This will watch for changes and rebuild automatically.
 │   ├── constants.ts       # Constants and configuration
 │   └── ...               # Additional source files
 ├── assets/
-│   ├── icon.png          # Plugin icon
-│   └── qrcode.png        # QR code for installation
-├── dist/
-│   ├── config.json       # Plugin configuration (generated)
-│   ├── Script.js         # Compiled script (generated)
-│   └── assets/           # Assets (copied)
+│   ├── logo.png          # Plugin icon
+│   └── qrcode.png        # QR code for installation (generated)
+├── dist/                 # Build output (gitignored)
+│   ├── config.json       # Minified plugin configuration
+│   └── script.js         # Minified and compiled script
 ├── package.json
 ├── tsconfig.json
 ├── rollup.config.js
@@ -101,6 +111,15 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Releases
+
+New versions are released through GitHub Actions. To create a new release:
+
+1. Go to Actions → Release Plugin
+2. Click "Run workflow"
+3. Enter the new version number
+4. The workflow will build, update the version, generate QR code, and create a GitHub release
 
 ## Support
 

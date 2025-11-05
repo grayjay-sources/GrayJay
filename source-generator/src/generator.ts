@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GeneratorOptions, PluginCapabilities } from './types';
-import { generateConfigJsonSimple } from './templates/config.template';
+import { generateConfigJson } from './templates/config.template';
 import { generateQRCode, generatePlaceholderIcon, ensureAssetsDirectory } from './assets';
 
 export class SourceGenerator {
@@ -80,11 +80,12 @@ export class SourceGenerator {
       name: `grayjay-${sanitizedName}-plugin`,
       version: '1.0.0',
       description: config.description,
-      main: 'dist/Script.js',
+      main: 'dist/script.js',
       scripts: {
         build: 'rollup -c',
         dev: 'rollup -c -w',
-        prettier: 'npx prettier --write ./src/**/*.ts'
+        prettier: 'npx prettier --write ./src/**/*.ts',
+        'generate-qr': 'node scripts/generate-qr.js'
       },
       engines: {
         node: '>=14',
@@ -100,10 +101,12 @@ export class SourceGenerator {
       devDependencies: {
         '@rollup/plugin-commonjs': '25.0.8',
         '@rollup/plugin-node-resolve': '15.2.3',
+        '@rollup/plugin-terser': '0.4.4',
         '@rollup/plugin-typescript': '11.1.6',
         'rollup': '4.18.0',
         'rollup-plugin-copy': '3.5.0',
         'rollup-plugin-delete': '2.0.0',
+        'rollup-plugin-json-minify': '1.0.0',
         'tslib': '2.6.2',
         'typescript': '5.4.5'
       }
@@ -116,7 +119,7 @@ export class SourceGenerator {
   }
 
   private async generateConfig(): Promise<void> {
-    const configJson = generateConfigJsonSimple(this.options.config);
+    const configJson = generateConfigJson(this.options.config);
     await fs.writeFile(
       path.join(this.options.outputDir, 'config.json'),
       configJson
@@ -131,7 +134,7 @@ export class SourceGenerator {
     const script = await this.assembleScript(capabilities);
     
     await fs.writeFile(
-      path.join(srcDir, 'Script.ts'),
+      path.join(srcDir, 'script.ts'),
       script
     );
   }
@@ -166,19 +169,23 @@ export class SourceGenerator {
       .replace(/interface Config \{[\s\S]*?\}/g, '');
     
     await fs.writeFile(
-      path.join(srcDir, 'Script.js'),
+      path.join(srcDir, 'script.js'),
       jsScript
     );
   }
 
   private async generateReadmeFile(): Promise<void> {
     const { config } = this.options;
-    const qrPath = config.repositoryUrl ? `${config.repositoryUrl}/raw/main/qrcode.png` : './qrcode.png';
+    const githubUserMatch = config.repositoryUrl.match(/github\.com\/([^\/]+)/);
+    const githubUser = githubUserMatch ? githubUserMatch[1] : 'username';
+    const repoNameMatch = config.repositoryUrl.match(/github\.com\/[^\/]+\/([^\/]+)/);
+    const repoName = repoNameMatch ? repoNameMatch[1].replace(/\.git$/, '') : 'repo';
     
     const readme = await this.getFormattedTemplate('snippets/readme-template.md', {
       PLATFORM_NAME: config.name,
       DESCRIPTION: config.description,
-      QR_PATH: qrPath,
+      GITHUB_USER: githubUser,
+      REPO_NAME: repoName,
       REPOSITORY_URL: config.repositoryUrl,
       HAS_SEARCH: config.hasSearch !== false ? 'x' : ' ',
       HAS_AUTH: config.hasAuth ? 'x' : ' ',
@@ -211,13 +218,17 @@ export class SourceGenerator {
     const assetsDir = await ensureAssetsDirectory(this.options.outputDir);
     const { config } = this.options;
 
-    // Generate placeholder icon
-    const iconPath = path.join(assetsDir, 'icon.png');
-    await generatePlaceholderIcon(iconPath, config.name);
+    // Generate placeholder logo
+    const logoPath = path.join(assetsDir, 'logo.png');
+    await generatePlaceholderIcon(logoPath, config.name);
 
-    // Generate QR code
-    const qrUrl = `${config.repositoryUrl}/config.json`;
-    const qrPath = path.join(this.options.outputDir, 'qrcode.png');
+    // Generate QR code in assets directory
+    const githubUserMatch = config.repositoryUrl.match(/github\.com\/([^\/]+)/);
+    const githubUser = githubUserMatch ? githubUserMatch[1] : 'username';
+    const repoNameMatch = config.repositoryUrl.match(/github\.com\/[^\/]+\/([^\/]+)/);
+    const repoName = repoNameMatch ? repoNameMatch[1].replace(/\.git$/, '') : 'repo';
+    const qrUrl = `grayjay://plugin/https://github.com/${githubUser}/${repoName}/releases/latest/download/config.json`;
+    const qrPath = path.join(assetsDir, 'qrcode.png');
     await generateQRCode(qrUrl, qrPath);
   }
 
@@ -387,9 +398,20 @@ export class SourceGenerator {
     const commentPagers = capabilities.hasComments 
       ? await this.getSnippet('comment-pagers', commonReplacements) 
       : '';
+    
+    // Advanced features (Mappers, Pagers, State Management)
+    const mappersHelper = (capabilities.hasPlaylists || capabilities.hasLiveStreams)
+      ? await this.getSnippet('mappers-template', commonReplacements)
+      : '';
+    const pagersHelper = (capabilities.hasPlaylists || capabilities.hasSearch)
+      ? await this.getSnippet('pagers-template', commonReplacements)
+      : '';
+    const stateManagement = capabilities.hasAuth
+      ? await this.getSnippet('state-management', commonReplacements)
+      : '';
 
     // Assemble the script with all replacements
-    return await this.getFormattedTemplate('Script.ts', {
+    return await this.getFormattedTemplate('script.template.ts', {
       ...commonReplacements,
       SEARCH_METHODS: searchMethods,
       PLAYLIST_METHODS: playlistMethods,
