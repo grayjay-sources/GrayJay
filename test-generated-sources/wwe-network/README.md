@@ -1,6 +1,6 @@
-# {{PLATFORM_NAME}} Plugin for GrayJay
+# WWE Network Plugin for GrayJay
 
-{{DESCRIPTION}}
+WWE Network streaming service - Live events, shows, and archive content
 
 ## Installation
 
@@ -8,12 +8,12 @@
 
 Click this link to install in GrayJay:
 
-**[Install Plugin](grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json)**
+**[Install Plugin](grayjay://plugin/https://github.com/grayjay-sources/grayjay-source-wwe-network/releases/latest/download/config.json)**
 
 Or use this URL:
 
 ```
-grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json
+grayjay://plugin/https://github.com/grayjay-sources/grayjay-source-wwe-network/releases/latest/download/config.json
 ```
 
 ### QR Code
@@ -24,18 +24,18 @@ Scan this QR code with the GrayJay app:
 
 ## Features
 
-- [{{HAS_SEARCH}}] Search
-- [{{HAS_AUTH}}] Authentication
-- [{{HAS_LIVE_STREAMS}}] Live Streams
-- [{{HAS_COMMENTS}}] Comments
-- [{{HAS_PLAYLISTS}}] Playlists
+- [x] Search
+- [ ] Authentication
+- [x] Live Streams
+- [ ] Comments
+- [x] Playlists
 - [x] Home Feed
 - [x] Channel Details
 - [x] Video Details
 
 ## Technology Stack
 
-{{TECH_STACK}}
+- REST API
 
 ## Development
 
@@ -116,10 +116,10 @@ The plugin can be configured through the GrayJay app settings:
 
 ## Platform Information
 
-- **Platform URL**: {{PLATFORM_URL}}
-- **Base API URL**: {{BASE_URL}}
-  {{AUTHOR_INFO}}
-- **Repository**: {{REPOSITORY_URL}}
+- **Platform URL**: https://www.wwe.com/watch
+- **Base API URL**: https://dce-frontoffice.imggaming.com
+  - **Author**: Bluscream
+- **Repository**: https://github.com/grayjay-sources/grayjay-source-wwe-network
 
 ## License
 
@@ -167,7 +167,7 @@ The publish script will:
 
 ## Support
 
-For issues and questions, please use the [GitHub Issues]({{REPOSITORY_URL}}/issues) page.
+For issues and questions, please use the [GitHub Issues](https://github.com/grayjay-sources/grayjay-source-wwe-network/issues) page.
 
 ## Acknowledgments
 

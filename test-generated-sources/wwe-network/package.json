@@ -1,0 +1,43 @@
+{
+  "name": "grayjay-wwe-network-plugin",
+  "version": "1.0.0",
+  "description": "WWE Network streaming service - Live events, shows, and archive content",
+  "main": "dist/script.js",
+  "scripts": {
+    "build": "rollup -c",
+    "sign": "node scripts/sign.js",
+    "build:sign": "npm run build && npm run sign",
+    "build:publish": "npm run build:sign && npm run publish",
+    "dev": "rollup -c -w",
+    "prettier": "npx prettier --write ./src/**/*.ts",
+    "publish": "node scripts/publish.js"
+  },
+  "engines": {
+    "node": ">=14",
+    "npm": ">=6.14.4"
+  },
+  "keywords": [
+    "grayjay",
+    "plugin",
+    "wwe-network",
+    "video"
+  ],
+  "author": "Bluscream",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grayjay-sources/grayjay-source-wwe-network"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "25.0.8",
+    "@rollup/plugin-node-resolve": "15.2.3",
+    "@rollup/plugin-terser": "0.4.4",
+    "@rollup/plugin-typescript": "11.1.6",
+    "rollup": "4.18.0",
+    "rollup-plugin-copy": "3.5.0",
+    "rollup-plugin-delete": "2.0.0",
+    "rollup-plugin-json-minify": "1.0.0",
+    "tslib": "2.6.2",
+    "typescript": "5.4.5"
+  }
+}

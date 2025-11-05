@@ -1,0 +1,91 @@
+name: Release Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 2, 3, 4)'
+        required: true
+        type: number
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update version in config.json
+        run: |
+          jq '.version = ${{ github.event.inputs.version }}' config.json > config.tmp.json
+          mv config.tmp.json config.json
+          echo "Updated version to ${{ github.event.inputs.version }}"
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          ls -lh dist/
+          echo "Script size:"
+          wc -c dist/script.js
+          echo "Config size:"
+          wc -c dist/config.json
+
+      - name: Generate QR Code
+        run: |
+          # Install qrcode package if not in devDependencies
+          npm install --no-save qrcode
+          npm run generate-qr
+
+      - name: Commit version bump
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add config.json assets/qrcode.png
+          git commit -m "chore: Bump version to ${{ github.event.inputs.version }}"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: Release v${{ github.event.inputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/config.json
+            dist/script.js
+            assets/logo.png
+            assets/qrcode.png
+          body: |
+            ## Installation
+            
+            **Quick Install:**
+            ```
+            grayjay://plugin/https://github.com/${{ github.repository }}/releases/latest/download/config.json
+            ```
+            
+            Or scan the QR code in the release assets.
+            
+            ## Changes in v${{ github.event.inputs.version }}
+            
+            _Add your changelog here_
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

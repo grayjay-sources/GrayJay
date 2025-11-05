@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "ESNext",
+    "rootDir": "./src",
+    "typeRoots": ["node_modules/@types", "types"],
+    "allowJs": true,
+    "checkJs": true,
+    "sourceMap": false,
+    "outDir": "./dist",
+    "removeComments": false,
+    "noEmit": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "include": ["./src/**/*.ts", "./types/**/*.d.ts"],
+  "exclude": ["node_modules", "./dist", "rollup.config.js"]
+}

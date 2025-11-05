@@ -1,0 +1,41 @@
+{
+  "name": "WWE Network",
+  "platformUrl": "https://www.wwe.com/watch",
+  "description": "WWE Network streaming service - Live events, shows, and archive content",
+  "author": "Bluscream",
+  "authorUrl": "",
+  "sourceUrl": "https://github.com/grayjay-sources/grayjay-source-wwe-network/releases/latest/download/config.json",
+  "scriptUrl": "./script.js",
+  "repositoryUrl": "https://github.com/grayjay-sources/grayjay-source-wwe-network",
+  "version": 1,
+  "iconUrl": "https://www.wwe.com/favicon.ico",
+  "id": "db07396d-b3d5-4f2c-bb86-b08eb7c6381f",
+  "scriptSignature": "",
+  "scriptPublicKey": "",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowAllHttpHeaderAccess": false,
+  "allowUrls": [
+    "dce-frontoffice.imggaming.com",
+    "www.wwe.com"
+  ],
+  "supportedClaimTypes": [
+    27
+  ],
+  "settings": [
+    {
+      "variable": "enableDebugLogging",
+      "name": "Enable Debug Logging",
+      "description": "Enable detailed logging for debugging purposes",
+      "type": "Boolean",
+      "default": "false"
+    }
+  ],
+  "changelog": {
+    "1": [
+      "Initial release"
+    ]
+  }
+}

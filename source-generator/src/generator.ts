@@ -122,7 +122,6 @@ export class SourceGenerator {
         'rollup': '4.18.0',
         'rollup-plugin-copy': '3.5.0',
         'rollup-plugin-delete': '2.0.0',
-        'rollup-plugin-json-minify': '1.0.0',
         'tslib': '2.6.2',
         'typescript': '5.4.5'
       }
@@ -529,22 +528,26 @@ export class SourceGenerator {
       ? await this.getSnippet('auth-methods', commonReplacements) 
       : '';
 
+    // Build state properties
+    const stateProperties = capabilities.hasAuth 
+      ? `authenticated: false,\n  authToken: ''`
+      : '';
+    
+    // Build load state logic
+    const loadState = capabilities.hasAuth
+      ? `const savedState = JSON.parse(conf.state || '{}');\n  Object.assign(state, savedState);`
+      : '';
+
     // Assemble the main script
     return await this.getFormattedTemplate('script.template.ts', {
       ...commonReplacements,
       IMPORTS: imports,
+      STATE_PROPERTIES: stateProperties,
+      LOAD_STATE: loadState,
       SEARCH_METHODS: searchMethods,
       PLAYLIST_METHODS: playlistMethods,
       COMMENT_METHODS: commentMethods,
-      AUTH_METHODS: authMethods,
-      GRAPHQL_HELPER: '', // Now imported
-      API_HELPER: '', // Now imported
-      HTML_HELPER: '', // Now imported
-      SEARCH_PAGERS: '', // Now imported
-      COMMENT_PAGERS: '', // Now imported
-      MAPPERS: '', // Now imported
-      PAGERS: '', // Now imported
-      STATE_MANAGEMENT: '' // Now imported
+      AUTH_METHODS: authMethods
     });
   }
 

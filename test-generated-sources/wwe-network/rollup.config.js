@@ -4,6 +4,7 @@ const typescript = require("@rollup/plugin-typescript");
 const terser = require("@rollup/plugin-terser");
 const copy = require("rollup-plugin-copy");
 const del = require("rollup-plugin-delete");
+const jsonMinify = require("rollup-plugin-json-minify");
 
 const dest = "./dist";
 
