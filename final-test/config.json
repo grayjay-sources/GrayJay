@@ -1,0 +1,41 @@
+{
+  "name": "Example Platform",
+  "platformUrl": "https://example.com",
+  "description": "Example Platform source plugin for GrayJay",
+  "author": "Bluscream",
+  "authorUrl": "",
+  "sourceUrl": "https://github.com/grayjay-sources/example/config.json",
+  "scriptUrl": "./Script.js",
+  "repositoryUrl": "https://github.com/grayjay-sources/example",
+  "version": 1,
+  "iconUrl": "./assets/icon.png",
+  "id": "11ac6e6d-a698-4e6d-9644-0d55eb06933c",
+  "scriptSignature": "",
+  "scriptPublicKey": "",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowAllHttpHeaderAccess": false,
+  "allowUrls": [
+    "api.example.com",
+    "example.com"
+  ],
+  "supportedClaimTypes": [
+    27
+  ],
+  "settings": [
+    {
+      "variable": "enableDebugLogging",
+      "name": "Enable Debug Logging",
+      "description": "Enable detailed logging for debugging purposes",
+      "type": "Boolean",
+      "default": "false"
+    }
+  ],
+  "changelog": {
+    "1": [
+      "Initial release"
+    ]
+  }
+}

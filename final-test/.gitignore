@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+*.tgz
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+npm-shrinkwrap.json

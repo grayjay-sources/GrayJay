@@ -244,6 +244,7 @@ class VideoDetailView : ConstraintLayout {
     private val _buttonSubscribe: SubscribeButton;
 
     private val _buttonPins: RoundButtonGroup;
+    private var _loaderGameVisible = false
     //private val _buttonMore: RoundButton;
 
     var preventPictureInPicture: Boolean = false
@@ -261,7 +262,6 @@ class VideoDetailView : ConstraintLayout {
     private val _textSkip: TextView;
     private val _textResume: TextView;
     private val _layoutResume: LinearLayout;
-    private var _jobHideResume: Job? = null;
     private val _layoutPlayerContainer: TouchInterceptFrameLayout;
     private val _layoutChangeBottomSection: LinearLayout;
 
@@ -548,6 +548,13 @@ class VideoDetailView : ConstraintLayout {
         _buttonMore = buttonMore;
         updateMoreButtons();
 
+        val handleLoaderGameVisibilityChanged = { b: Boolean ->
+            _loaderGameVisible = b
+            updateResumeVisibilityFor(lastPositionMilliseconds)
+        }
+        _player.loaderGameVisibilityChanged.subscribe(handleLoaderGameVisibilityChanged)
+        _cast.loaderGameVisibilityChanged.subscribe(handleLoaderGameVisibilityChanged)
+
         _channelButton.setOnClickListener {
             if (video is TutorialFragment.TutorialVideo) {
                 return@setOnClickListener
@@ -576,9 +583,8 @@ class VideoDetailView : ConstraintLayout {
                 if(chapter?.type == ChapterType.SKIPPABLE) {
                     _layoutSkip.visibility = VISIBLE;
                 } else if(chapter?.type == ChapterType.SKIP || chapter?.type == ChapterType.SKIPONCE) {
-                    val ad = StateCasting.instance.activeDevice
-                    if (ad != null) {
-                        ad.seekVideo(chapter.timeEnd)
+                    if (StateCasting.instance.activeDevice != null) {
+                        StateCasting.instance.videoSeekTo(chapter.timeEnd)
                     } else {
                         _player.seekTo((chapter.timeEnd * 1000).toLong());
                     }
@@ -873,11 +879,6 @@ class VideoDetailView : ConstraintLayout {
 
         _layoutResume.setOnClickListener {
             handleSeek(_historicalPosition * 1000);
-
-            val job = _jobHideResume;
-            _jobHideResume = null;
-            job?.cancel();
-
             _layoutResume.visibility = View.GONE;
         };
 
@@ -886,7 +887,7 @@ class VideoDetailView : ConstraintLayout {
             if (ad != null) {
                 val currentChapter = _cast.getCurrentChapter((ad.time * 1000).toLong());
                 if(currentChapter?.type == ChapterType.SKIPPABLE) {
-                    ad.seekVideo(currentChapter.timeEnd);
+                    StateCasting.instance.videoSeekTo(currentChapter.timeEnd);
                 }
             } else {
                 val currentChapter = _player.getCurrentChapter(_player.position);
@@ -1005,8 +1006,7 @@ class VideoDetailView : ConstraintLayout {
                         }
                     }
                     _slideUpOverlay?.hide();
-                } else null,
-            if(video is JSVideoDetails && (video as JSVideoDetails).hasVODEvents())
+                } else if(video is JSVideoDetails && (video as JSVideoDetails).hasVODEvents())
                 RoundButton(context, R.drawable.ic_chat, context.getString(R.string.vod_chat), TAG_VODCHAT) {
                     video?.let {
                         try {
@@ -1155,7 +1155,7 @@ class VideoDetailView : ConstraintLayout {
         //Recover cancelled loads
         if(video == null) {
             val t = (lastPositionMilliseconds / 1000.0f).roundToLong();
-            if(_searchVideo != null)
+            if(_searchVideo != null && !wasLoginCall)
                 setVideoOverview(_searchVideo!!, true, t);
             else if(_url != null && !wasLoginCall)
                 setVideo(_url!!, t, _playWhenReady);
@@ -1257,10 +1257,6 @@ class VideoDetailView : ConstraintLayout {
         MediaControlReceiver.onCloseReceived.remove(this);
         MediaControlReceiver.onBackgroundReceived.remove(this);
         MediaControlReceiver.onSeekToReceived.remove(this);
-
-        val job = _jobHideResume;
-        _jobHideResume = null;
-        job?.cancel();
     }
 
     //Video Setters
@@ -1782,26 +1778,7 @@ class VideoDetailView : ConstraintLayout {
                         TAG,
                         "Historical position: $_historicalPosition, last position: $lastPositionMilliseconds"
                     );
-                    if (_historicalPosition > 60 && video.duration - _historicalPosition > 5 && Math.abs(
-                            _historicalPosition - lastPositionMilliseconds / 1000
-                        ) > 5.0
-                    ) {
-                        _layoutResume.visibility = View.VISIBLE;
-                        _textResume.text = "Resume at ${_historicalPosition.toHumanTime(false)}";
-
-                        _jobHideResume = fragment.lifecycleScope.launch(Dispatchers.Main) {
-                            try {
-                                delay(8000);
-                                _layoutResume.visibility = View.GONE;
-                                _textResume.text = "";
-                            } catch (e: Throwable) {
-                                Logger.e(TAG, "Failed to set resume changes.", e);
-                            }
-                        }
-                    } else {
-                        _layoutResume.visibility = View.GONE;
-                        _textResume.text = "";
-                    }
+                    updateResumeVisibilityFor(lastPositionMilliseconds)
                 }
             }
         }
@@ -1845,6 +1822,35 @@ class VideoDetailView : ConstraintLayout {
         if (StatePlayer.instance.autoplay) {
             _taskLoadRecommendations.cancel()
             _taskLoadRecommendations.run(videoDetail.url)
+        }
+    }
+
+    private fun shouldShowResume(positionMs: Long): Boolean {
+        if (_loaderGameVisible) return false
+        val v = video ?: return false
+        val resumeS = _historicalPosition
+        val durS = v.duration
+
+        if (_overlay_loading.visibility == View.VISIBLE) return false
+        if (resumeS <= 60) return false
+        if (durS - resumeS <= 5) return false
+
+        val posMs = positionMs
+        val resumeMs = resumeS * 1000
+        val durMs = durS * 1000L
+        val inFirstFewSeconds = posMs < 8_000
+        val notYetReachedResume = (resumeMs - posMs) > 5_000
+        return inFirstFewSeconds && notYetReachedResume && durMs > 0
+    }
+
+    private fun updateResumeVisibilityFor(positionMs: Long) {
+        val visible = shouldShowResume(positionMs)
+        if (visible) {
+            _layoutResume.visibility = View.VISIBLE
+            _textResume.text = "Resume at ${_historicalPosition.toHumanTime(false)}"
+        } else {
+            _layoutResume.visibility = View.GONE
+            _textResume.text = ""
         }
     }
     fun loadVODChat(video: IPlatformVideoDetails) {
@@ -2369,11 +2375,11 @@ class VideoDetailView : ConstraintLayout {
             ?.distinct()
             ?.toList() ?: listOf() else audioSources?.toList() ?: listOf();
 
-        val canSetSpeed = !_isCasting || StateCasting.instance.activeDevice?.canSetSpeed == true
+        val canSetSpeed = !_isCasting || StateCasting.instance.activeDevice?.canSetSpeed() == true
         val currentPlaybackRate = if (_isCasting) StateCasting.instance.activeDevice?.speed else _player.getPlaybackRate()
         val qualityPlaybackSpeedTitle = if (canSetSpeed) SlideUpMenuTitle(this.context).apply { setTitle(context.getString(R.string.playback_rate) + " (${String.format("%.2f", currentPlaybackRate)})"); } else null;
         _overlay_quality_selector = SlideUpMenuOverlay(this.context, _overlay_quality_container, context.getString(
-                    R.string.quality), null, true,
+                R.string.quality), null, true,
             qualityPlaybackSpeedTitle,
             if (canSetSpeed) SlideUpMenuButtonList(this.context, null, "playback_rate").apply {
                 val playbackSpeeds = Settings.instance.playback.getPlaybackSpeeds();
@@ -2394,7 +2400,7 @@ class VideoDetailView : ConstraintLayout {
                     val newPlaybackSpeed = playbackSpeedString.toDouble();
                     if (_isCasting) {
                         val ad = StateCasting.instance.activeDevice ?: return@subscribe
-                        if (!ad.canSetSpeed) {
+                        if (!ad.canSetSpeed()) {
                             return@subscribe
                         }
 
@@ -2518,6 +2524,7 @@ class VideoDetailView : ConstraintLayout {
         if (!StateCasting.instance.resumeVideo()) {
             _player.play();
         }
+        onShouldEnterPictureInPictureChanged.emit()
 
         //TODO: This was needed because handleLowerVolume was done.
         //_player.setVolume(1.0f);
@@ -2534,6 +2541,7 @@ class VideoDetailView : ConstraintLayout {
         if (!StateCasting.instance.pauseVideo()) {
             _player.pause();
         }
+        onShouldEnterPictureInPictureChanged.emit()
     }
     private fun handleSeek(ms: Long) {
         Logger.i(TAG, "handleSeek(ms=$ms)")
@@ -2805,6 +2813,8 @@ class VideoDetailView : ConstraintLayout {
             _overlay_loading.visibility = View.GONE;
             (_overlay_loading_spinner.drawable as Animatable?)?.stop()
         }
+
+        updateResumeVisibilityFor(lastPositionMilliseconds)
     }
 
     //UI Actions
@@ -3038,9 +3048,9 @@ class VideoDetailView : ConstraintLayout {
         }
 
         val playpauseAction = if(_player.playing)
-            RemoteAction(Icon.createWithResource(context, R.drawable.ic_pause_notif), context.getString(R.string.pause), context.getString(R.string.pauses_the_video), MediaControlReceiver.getPauseIntent(context, 5));
+            RemoteAction(Icon.createWithResource(context, R.drawable.ic_pause_notif), context.getString(R.string.pause), context.getString(R.string.pauses_the_video), MediaControlReceiver.getPauseIntent(context, 2));
         else
-            RemoteAction(Icon.createWithResource(context, R.drawable.ic_play_notif), context.getString(R.string.play), context.getString(R.string.resumes_the_video), MediaControlReceiver.getPlayIntent(context, 6));
+            RemoteAction(Icon.createWithResource(context, R.drawable.ic_play_notif), context.getString(R.string.play), context.getString(R.string.resumes_the_video), MediaControlReceiver.getPlayIntent(context, 1));
 
         val toBackgroundAction = RemoteAction(Icon.createWithResource(context, R.drawable.ic_screen_share), context.getString(R.string.background), context.getString(R.string.background_switch_audio), MediaControlReceiver.getToBackgroundIntent(context, 7));
 
@@ -3095,6 +3105,8 @@ class VideoDetailView : ConstraintLayout {
                 handleSeek(55000);
             }
         }
+
+        updateResumeVisibilityFor(positionMilliseconds)
     }
 
     private fun updateTracker(positionMs: Long, isPlaying: Boolean, forceUpdate: Boolean = false) {

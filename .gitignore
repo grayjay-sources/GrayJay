@@ -1,1 +1,4 @@
 /debug.log
+test-plugin/
+source-generator/node_modules/
+source-generator/dist/

@@ -1,0 +1,37 @@
+{
+  "name": "grayjay-example-platform-plugin",
+  "version": "1.0.0",
+  "description": "Example Platform source plugin for GrayJay",
+  "main": "dist/Script.js",
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "prettier": "npx prettier --write ./src/**/*.ts"
+  },
+  "engines": {
+    "node": ">=14",
+    "npm": ">=6.14.4"
+  },
+  "keywords": [
+    "grayjay",
+    "plugin",
+    "example-platform",
+    "video"
+  ],
+  "author": "Bluscream",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grayjay-sources/example"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "25.0.8",
+    "@rollup/plugin-node-resolve": "15.2.3",
+    "@rollup/plugin-typescript": "11.1.6",
+    "rollup": "4.18.0",
+    "rollup-plugin-copy": "3.5.0",
+    "rollup-plugin-delete": "2.0.0",
+    "tslib": "2.6.2",
+    "typescript": "5.4.5"
+  }
+}

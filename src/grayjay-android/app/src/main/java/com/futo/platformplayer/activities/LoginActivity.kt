@@ -76,8 +76,24 @@ class LoginActivity : AppCompatActivity() {
         };
         var isFirstLoad = true;
         val loginWarnings = authConfig.loginWarnings?.toMutableList() ?: mutableListOf<SourcePluginAuthConfig.Warning>();
+        val uiMods = authConfig.uiMods?.toMutableList() ?: mutableListOf<SourcePluginAuthConfig.UIMod>();
+        var currentScale = 100;
+        var currentDesktop = false;
         webViewClient.onPageLoaded.subscribe { view, url ->
             _textUrl.setText(url ?: "");
+
+            if(loginWarnings.size > 0 && url != null) {
+                synchronized(loginWarnings) {
+                    val warning = loginWarnings.find { url.matches(it.getRegex()) };
+                    if(warning != null) {
+                        if(warning.once == true)
+                            loginWarnings.remove(warning);
+                        UIDialogs.showDialog(this@LoginActivity, R.drawable.ic_warning_yellow, warning.text ?: "", warning.details ?: "", null, 0,
+                            UIDialogs.Action("Understood", {
+                            }, UIDialogs.ActionStyle.PRIMARY));
+                    }
+                }
+            }
 
             if(!isFirstLoad)
                 return@subscribe;
@@ -89,18 +105,34 @@ class LoginActivity : AppCompatActivity() {
                 view?.evaluateJavascript("setTimeout(()=> document.querySelector(\"${authConfig.loginButton}\")?.click(), 1000)", {});
             }
 
-            if(loginWarnings.size > 0) {
-                synchronized(loginWarnings) {
-                    val warning = loginWarnings.find { it.url.matches(it.getRegex()) };
-                    if(warning != null) {
-                        if(warning.once == true)
-                            loginWarnings.remove(warning);
-                        UIDialogs.showDialog(this@LoginActivity, R.drawable.ic_warning_yellow, warning.text ?: "", warning.details ?: "", null, 0,
-                            UIDialogs.Action("Understood", {
-                            }, UIDialogs.ActionStyle.PRIMARY));
+            /*
+            var specifiedScale = false;
+            var specifiedDesktop = false;
+            if(uiMods.size > 0 && url != null) {
+                synchronized(uiMods) {
+                    val uimod = uiMods.find { url.matches(it.getRegex()) };
+                    if(uimod != null) {
+                        if(uimod.scale != null) {
+                            currentScale =(uimod.scale * 100).toInt();
+                            _webView.setInitialScale(currentScale);
+                            specifiedScale = true;
+                        }
+                        if(uimod.desktop != null && uimod.desktop) {
+                            _webView.settings.useWideViewPort = true;
+                            specifiedDesktop = true;
+                        }
                     }
                 }
             }
+            if(!specifiedScale && currentScale != 100) {
+                currentScale = (100).toInt();
+                _webView.setInitialScale(currentScale);
+            }
+            if(!specifiedDesktop && currentDesktop) {
+                _webView.settings.useWideViewPort = false;
+                currentDesktop = false;
+            }
+            */
         }
         _webView.settings.domStorageEnabled = true;
 

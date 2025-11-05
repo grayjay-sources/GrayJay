@@ -1,0 +1,39 @@
+{
+  "name": "Example Plugin",
+  "description": "Example plugin for testing",
+  "author": "Your Name",
+  "authorUrl": "https://github.com/yourname",
+  "platformUrl": "https://example.com",
+  "sourceUrl": "https://github.com/yourname/example-plugin/blob/main/ExampleConfig.json",
+  "repositoryUrl": "https://github.com/yourname/example-plugin",
+  "scriptUrl": "./ExampleScript.js",
+  "version": 1,
+  "iconUrl": "./ExampleIcon.png",
+  "id": "example-plugin-unique-id",
+  "scriptSignature": "",
+  "scriptPublicKey": "",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowUrls": [
+    "example.com"
+  ],
+  "supportedClaimTypes": [
+    3
+  ],
+  "authentication": {
+    "loginUrl": "https://example.com/login",
+    "userAgent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36",
+    "domainHeadersToFind": {
+      "example.com": []
+    }
+  },
+  "settings": [],
+  "changelog": {
+    "1": [
+      "Initial version"
+    ]
+  }
+}
+

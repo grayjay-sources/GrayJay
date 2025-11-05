@@ -1,0 +1,49 @@
+{
+  "name": "@grayjay/source-generator",
+  "version": "1.0.0",
+  "description": "CLI tool to generate GrayJay source plugin skeleton projects",
+  "main": "dist/index.js",
+  "bin": {
+    "grayjay-generate": "./dist/cli.js",
+    "gjsg": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepare": "npm run build",
+    "test": "node dist/cli.js --help"
+  },
+  "keywords": [
+    "grayjay",
+    "plugin",
+    "generator",
+    "scaffold",
+    "cli",
+    "source",
+    "video"
+  ],
+  "author": "Bluscream",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grayjay-sources/source-generator.git"
+  },
+  "engines": {
+    "node": ">=14",
+    "npm": ">=6.14.4"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.12",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1",
+    "qrcode": "^1.5.3",
+    "sharp": "^0.33.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/inquirer": "^9.0.7",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.4.5"
+  }
+}

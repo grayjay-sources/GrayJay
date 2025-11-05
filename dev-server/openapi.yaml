@@ -1,0 +1,499 @@
+openapi: 3.0.3
+info:
+  title: GrayJay Plugin Development Server API
+  description: |
+    API specification for the GrayJay Plugin Development Server.
+    This server provides endpoints for testing and developing GrayJay plugins locally.
+
+    The server runs on port 11337 and provides:
+    - Plugin loading and management
+    - Remote procedure calls to plugins
+    - Development logging
+    - Package management
+
+  version: 1.0.0
+  contact:
+    name: GrayJay Development
+servers:
+  - url: http://100.100.1.57:11337
+    description: Local development server
+  - url: http://localhost:11337
+    description: Localhost alternative
+
+paths:
+  /dev:
+    get:
+      summary: Development Portal
+      description: Main development portal HTML interface
+      responses:
+        "200":
+          description: Development portal HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /plugin/isLoggedIn:
+    get:
+      summary: Check Plugin Login Status
+      description: Checks if the current plugin session is authenticated
+      responses:
+        "200":
+          description: Login status response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isLoggedIn:
+                    type: boolean
+
+  /get:
+    post:
+      summary: Generic GET operation
+      description: Generic endpoint for retrieving data with specific content type
+      parameters:
+        - name: CT
+          in: query
+          description: Content type (text/json or application/js)
+          required: true
+          schema:
+            type: string
+            enum:
+              - text/json
+              - application/js
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+            application/javascript:
+              schema:
+                type: string
+
+  /plugin/getWarnings:
+    post:
+      summary: Get Plugin Warnings
+      description: Retrieves warnings generated during plugin execution
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pluginId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Plugin warnings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warnings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                        level:
+                          type: string
+
+  /plugin/updateTestPlugin:
+    post:
+      summary: Update Test Plugin
+      description: Updates the test plugin configuration and code
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pluginId:
+                  type: string
+                  format: uuid
+                config:
+                  type: object
+                script:
+                  type: string
+      responses:
+        "200":
+          description: Plugin update successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /plugin/packageGet:
+    get:
+      summary: Get Plugin Package
+      description: Retrieves a specific plugin package by variable name
+      parameters:
+        - name: variable
+          in: query
+          description: Package variable name (e.g., 'bridge', 'http')
+          required: true
+          schema:
+            type: string
+            examples:
+              - bridge
+              - http
+      responses:
+        "200":
+          description: Package code
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+  /plugin/remoteTest:
+    post:
+      summary: Test Plugin Method
+      description: |
+        Tests a plugin method via the DevPortal UI.
+        Simplified interface for testing without needing plugin instance IDs.
+        Used by the DevPortal Testing tab.
+      parameters:
+        - name: method
+          in: query
+          description: Method name to test (e.g., 'enable', 'getHome', 'isContentDetailsUrl')
+          required: true
+          schema:
+            type: string
+            example: getHome
+      requestBody:
+        description: Optional method parameters (if the method requires arguments)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  description: URL parameter for methods like isContentDetailsUrl
+                  example: "https://aniworld.to/anime/stream/example"
+                query:
+                  type: string
+                  description: Search query parameter
+                  example: "anime name"
+            examples:
+              noParameters:
+                summary: Method with no parameters
+                value: {}
+              withUrl:
+                summary: Method with URL parameter
+                value:
+                  url: "https://aniworld.to/anime/stream/example"
+              withQuery:
+                summary: Search method
+                value:
+                  query: "search term"
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: any
+                  error:
+                    type: string
+                    nullable: true
+              examples:
+                success:
+                  summary: Successful test
+                  value:
+                    result: null
+                    error: null
+                withData:
+                  summary: Test returning data
+                  value:
+                    result:
+                      results: []
+                      hasMore: false
+                    error: null
+                error:
+                  summary: Test with error
+                  value:
+                    result: null
+                    error: "Error message"
+        "500":
+          description: Test failed
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /plugin/remoteCall:
+    post:
+      summary: Remote Procedure Call
+      description: |
+        Executes a remote procedure call on a specific plugin instance.
+        Used internally by packages and for direct method invocation with specific IDs.
+      parameters:
+        - name: id
+          in: query
+          description: Plugin or package instance ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: "fb7fd038-31a8-4f95-a0a7-47ed59a79f77"
+        - name: method
+          in: query
+          description: Method name to call (e.g., 'GET', 'log')
+          required: true
+          schema:
+            type: string
+            example: GET
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                args:
+                  type: array
+                  items: {}
+            examples:
+              httpGet:
+                summary: HTTP GET call
+                value:
+                  args: ["https://aniworld.to/"]
+              log:
+                summary: Log message
+                value:
+                  args: ["Test message"]
+      responses:
+        "200":
+          description: RPC result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: {}
+                  success:
+                    type: boolean
+
+  /plugin/getDevLogs:
+    get:
+      summary: Get Development Logs
+      description: Retrieves development logs from the plugin
+      parameters:
+        - name: index
+          in: query
+          description: Starting index for logs (-1 for all logs)
+          required: true
+          schema:
+            type: integer
+            default: -1
+      responses:
+        "200":
+          description: Development logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: integer
+                          format: int64
+                        level:
+                          type: string
+                          enum:
+                            - debug
+                            - info
+                            - warning
+                            - error
+                        message:
+                          type: string
+                  nextIndex:
+                    type: integer
+
+  /source.js:
+    get:
+      summary: Get Source JavaScript
+      description: Core source code for plugin execution
+      responses:
+        "200":
+          description: Source JavaScript code
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+  /dev_bridge.js:
+    get:
+      summary: Get Development Bridge
+      description: Bridge code for communication between dev portal and plugin
+      responses:
+        "200":
+          description: Bridge JavaScript code
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+  /source_docs.js:
+    get:
+      summary: Get Source Documentation
+      description: Documentation for plugin development
+      responses:
+        "200":
+          description: Documentation JavaScript
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+  /source_doc_urls.js:
+    get:
+      summary: Get Documentation URLs
+      description: URLs for plugin documentation resources
+      responses:
+        "200":
+          description: Documentation URLs JavaScript
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+  /dependencies/FutoMainLogo.svg:
+    get:
+      summary: Get FUTO Logo
+      description: FUTO main logo SVG
+      responses:
+        "200":
+          description: SVG logo
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+
+components:
+  schemas:
+    PluginConfig:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Plugin name
+        description:
+          type: string
+        author:
+          type: string
+        authorUrl:
+          type: string
+        platformUrl:
+          type: string
+        sourceUrl:
+          type: string
+        repositoryUrl:
+          type: string
+        scriptUrl:
+          type: string
+          description: URL to the plugin script
+        version:
+          type: integer
+        iconUrl:
+          type: string
+        id:
+          type: string
+        scriptSignature:
+          type: string
+        scriptPublicKey:
+          type: string
+        packages:
+          type: array
+          items:
+            type: string
+          description: Required packages (e.g., Http, Dom)
+        allowEval:
+          type: boolean
+        allowUrls:
+          type: array
+          items:
+            type: string
+        supportedClaimTypes:
+          type: array
+          items:
+            type: integer
+        authentication:
+          type: object
+          properties:
+            loginUrl:
+              type: string
+            userAgent:
+              type: string
+            domainHeadersToFind:
+              type: object
+        settings:
+          type: array
+        changelog:
+          type: object
+
+    PluginInstance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        config:
+          $ref: "#/components/schemas/PluginConfig"
+        status:
+          type: string
+          enum:
+            - loaded
+            - error
+            - loading
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        level:
+          type: string
+          enum:
+            - debug
+            - info
+            - warning
+            - error
+        message:
+          type: string
+
+  securitySchemes:
+    none:
+      type: apiKey
+      in: header
+      name: none
+
+tags:
+  - name: Plugin Management
+    description: Endpoints for managing plugins
+  - name: Development
+    description: Development and debugging endpoints
+  - name: Assets
+    description: Static assets and resources

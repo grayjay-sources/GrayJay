@@ -1,0 +1,11 @@
+src/
+tsconfig.json
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+node_modules/
+test-plugin/

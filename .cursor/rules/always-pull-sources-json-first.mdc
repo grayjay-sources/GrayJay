@@ -1,0 +1,6 @@
+---
+globs: repo/grayjay-sources.github.io/sources.json
+alwaysApply: false
+---
+
+Always pull sources.json from github first before doing changes to it. There are github actions constantly working on it.
