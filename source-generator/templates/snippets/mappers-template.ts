@@ -2,7 +2,7 @@ import { PLATFORM, BASE_URL } from './constants';
 
 // Mapper functions convert platform-specific data structures to GrayJay types
 
-export function {{PLATFORM_PASCAL}}AssetToGrayjayVideo(
+export function assetToGrayjayVideo(
   pluginId: string,
   asset: any
 ): PlatformVideo {
@@ -53,7 +53,7 @@ export function {{PLATFORM_PASCAL}}AssetToGrayjayVideo(
   return new PlatformVideo(video);
 }
 
-export function {{PLATFORM_PASCAL}}ChannelToGrayjayChannel(
+export function channelToGrayjayChannel(
   pluginId: string,
   channel: any,
   url?: string

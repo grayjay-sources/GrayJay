@@ -116,4 +116,3 @@ function log(message: string) {
 }
 
 log('WWE Network script loaded');
-
