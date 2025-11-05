@@ -96,7 +96,9 @@ export class SourceGenerator {
       main: 'dist/script.js',
       scripts: {
         build: 'rollup -c',
-        'build:publish': 'npm run build && npm run publish',
+        sign: 'node scripts/sign.js',
+        'build:sign': 'npm run build && npm run sign',
+        'build:publish': 'npm run build:sign && npm run publish',
         dev: 'rollup -c -w',
         prettier: 'npx prettier --write ./src/**/*.ts',
         publish: 'node scripts/publish.js'

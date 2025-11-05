@@ -1,30 +1,66 @@
 #!/usr/bin/env node
 
 /**
- * Publish script to trigger GitHub release workflow
+ * Automated Publishing Script for GrayJay Plugin
+ * 
+ * This script:
+ * 1. Reads the current version from dist/config.json
+ * 2. Bumps the version (patch by default, or specify version)
+ * 3. Updates dist/config.json with the new version
+ * 4. Builds the plugin
+ * 5. Signs the plugin (generates signature and public key)
+ * 6. Generates a QR code for the plugin
+ * 7. Commits the changes
+ * 8. Creates a git tag
+ * 9. Pushes to GitHub (triggers release workflow)
  * 
  * Usage:
- *   npm run publish [version]
- *   node scripts/publish.js [version]
- * 
- * Requirements:
- *   - GITHUB_TOKEN environment variable with repo permissions
- *   - Git repository with GitHub remote
+ *   npm run publish        # Bumps patch version
+ *   npm run publish 2      # Sets version to 2
  */
 
-const https = require('https');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+const CONFIG_PATH = path.join(__dirname, '..', 'dist', 'config.json');
+const QR_CODE_PATH = path.join(__dirname, '..', 'assets', 'qrcode.png');
+
+// Colors for console output
+const colors = {
+  reset: '\x1b[0m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  cyan: '\x1b[36m',
+};
+
+function log(message, color = colors.reset) {
+  console.log(`${color}${message}${colors.reset}`);
+}
+
+function getCurrentVersion() {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      log('⚠️  config.json not found. Building first...', colors.yellow);
+      execSync('npm run build', { stdio: 'inherit' });
+    }
+    
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return config.version || 1;
+  } catch (error) {
+    log('⚠️  Could not read current version from config.json', colors.yellow);
+    return 1;
+  }
+}
+
 function getGitHubInfo() {
   try {
-    // Get remote URL
-    const remoteUrl = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
+    const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const repoUrl = packageJson.repository?.url || execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
     
     // Parse GitHub owner and repo from URL
-    // Supports: https://github.com/owner/repo.git or git@github.com:owner/repo.git
-    let match = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+    const match = repoUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
     
     if (!match) {
       throw new Error('Could not parse GitHub repository from git remote');
@@ -39,117 +75,106 @@ function getGitHubInfo() {
   }
 }
 
-function getCurrentVersion() {
+function generateQRCode(url) {
+  log('\n📱 Generating QR code...', colors.cyan);
+  
   try {
-    const configPath = path.join(process.cwd(), 'config.json');
-    if (!fs.existsSync(configPath)) {
-      return 1;
-    }
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    return config.version || 1;
+    const QRCode = require('qrcode');
+    QRCode.toFile(QR_CODE_PATH, url, {
+      width: 512,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
+    log(`✅ QR code generated: ${QR_CODE_PATH}`, colors.green);
   } catch (error) {
-    console.warn('⚠️  Could not read current version from config.json');
-    return 1;
+    log(`⚠️  Failed to generate QR code: ${error.message}`, colors.yellow);
   }
 }
 
-function triggerWorkflow(owner, repo, version, token) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({
-      ref: 'main',
-      inputs: {
-        version: version.toString()
-      }
-    });
-    
-    const options = {
-      hostname: 'api.github.com',
-      port: 443,
-      path: `/repos/${owner}/${repo}/actions/workflows/release.yml/dispatches`,
-      method: 'POST',
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Content-Length': data.length,
-        'User-Agent': 'GrayJay-Source-Generator'
-      }
-    };
-    
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => body += chunk);
-      res.on('end', () => {
-        if (res.statusCode === 204) {
-          resolve();
-        } else {
-          reject(new Error(`GitHub API error ${res.statusCode}: ${body}`));
-        }
-      });
-    });
-    
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
-}
-
 async function publish() {
-  console.log('\n🚀 GrayJay Plugin Publisher\n');
+  log('\n🚀 GrayJay Plugin Publisher\n', colors.cyan);
   
-  // Get version from command line or increment current
+  // Step 1: Get version
   const currentVersion = getCurrentVersion();
   const newVersion = process.argv[2] ? parseInt(process.argv[2]) : currentVersion + 1;
   
   if (isNaN(newVersion) || newVersion < 1) {
-    console.error('❌ Invalid version number. Must be a positive integer.');
+    log('❌ Invalid version number. Must be a positive integer.', colors.red);
     process.exit(1);
   }
   
-  console.log(`📦 Current version: ${currentVersion}`);
-  console.log(`📦 New version: ${newVersion}`);
+  log(`📦 Current version: ${currentVersion}`, colors.cyan);
+  log(`📦 New version: ${newVersion}`, colors.cyan);
   
-  // Check for GITHUB_TOKEN
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) {
-    console.error('\n❌ GITHUB_TOKEN environment variable not set');
-    console.error('\nTo publish, you need a GitHub Personal Access Token with repo permissions.');
-    console.error('Create one at: https://github.com/settings/tokens');
-    console.error('\nThen set it as an environment variable:');
-    console.error('  export GITHUB_TOKEN=your_token_here');
-    console.error('\nOr run manually:');
-    console.error('  GITHUB_TOKEN=your_token npm run publish');
-    process.exit(1);
-  }
-  
-  // Get GitHub repository info
-  console.log('\n🔍 Detecting GitHub repository...');
-  let gitHubInfo;
+  // Step 2: Get GitHub info for install URL
+  let githubInfo;
   try {
-    gitHubInfo = getGitHubInfo();
-    console.log(`✅ Repository: ${gitHubInfo.owner}/${gitHubInfo.repo}`);
+    githubInfo = getGitHubInfo();
+    log(`✅ Repository: ${githubInfo.owner}/${githubInfo.repo}`, colors.green);
   } catch (error) {
-    console.error(`❌ ${error.message}`);
+    log(`❌ ${error.message}`, colors.red);
     process.exit(1);
   }
   
-  // Trigger the workflow
-  console.log('\n🎬 Triggering release workflow...');
+  // Step 3: Build the plugin
+  log('\n🔨 Building plugin...', colors.yellow);
+  execSync('npm run build', { stdio: 'inherit' });
+  
+  // Step 4: Update version in config.json
+  log('\n📝 Updating version in config.json...', colors.cyan);
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const oldVersion = config.version || 1;
+  config.version = newVersion;
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  log(`📦 Version bumped: ${oldVersion} → ${newVersion}`, colors.cyan);
+  
+  // Step 5: Sign the plugin
+  log('\n🔐 Signing plugin...', colors.yellow);
   try {
-    await triggerWorkflow(gitHubInfo.owner, gitHubInfo.repo, newVersion, token);
-    console.log('✅ Release workflow triggered successfully!');
-    console.log(`\n📋 Check progress at:`);
-    console.log(`   https://github.com/${gitHubInfo.owner}/${gitHubInfo.repo}/actions`);
-    console.log(`\n🎉 Release will be available at:`);
-    console.log(`   https://github.com/${gitHubInfo.owner}/${gitHubInfo.repo}/releases/tag/v${newVersion}`);
+    execSync('npm run sign', { stdio: 'inherit' });
   } catch (error) {
-    console.error(`❌ Failed to trigger workflow: ${error.message}`);
+    log('❌ Signing failed. Make sure OpenSSL is installed.', colors.red);
     process.exit(1);
   }
+  
+  // Reload config after signing to get signature
+  const signedConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  
+  // Step 6: Generate QR code
+  const installUrl = `grayjay://plugin/${signedConfig.sourceUrl}`;
+  generateQRCode(installUrl);
+  
+  // Step 7: Commit changes
+  log('\n📝 Committing changes...', colors.cyan);
+  execSync('git add dist/ assets/qrcode.png', { stdio: 'inherit' });
+  execSync(`git commit -m "chore: Release v${newVersion}" -m "- Updated version to ${newVersion}" -m "- Signed plugin" -m "- Generated QR code"`, { stdio: 'inherit' });
+  log('✅ Changes committed', colors.green);
+  
+  // Step 8: Create git tag
+  log(`\n🏷️  Creating git tag v${newVersion}...`, colors.cyan);
+  execSync(`git tag -a v${newVersion} -m "Release v${newVersion}"`, { stdio: 'inherit' });
+  log(`✅ Tag created: v${newVersion}`, colors.green);
+  
+  // Step 9: Push to GitHub
+  log('\n📤 Pushing to GitHub...', colors.yellow);
+  execSync('git push && git push --tags', { stdio: 'inherit' });
+  log('✅ Pushed successfully!', colors.green);
+  
+  log(`\n✅ Publication complete!\n`, colors.green);
+  log(`📋 Summary:`, colors.cyan);
+  log(`   Version: v${newVersion}`, colors.reset);
+  log(`   Repository: ${githubInfo.owner}/${githubInfo.repo}`, colors.reset);
+  log(`   Install URL: ${installUrl}`, colors.reset);
+  log(`\n📦 GitHub Release will be created automatically`, colors.cyan);
+  log(`   Check: https://github.com/${githubInfo.owner}/${githubInfo.repo}/releases/tag/v${newVersion}`, colors.reset);
 }
 
 publish().catch((error) => {
-  console.error(`❌ Unexpected error: ${error.message}`);
+  log(`❌ Unexpected error: ${error.message}`, colors.red);
+  console.error(error);
   process.exit(1);
 });
 

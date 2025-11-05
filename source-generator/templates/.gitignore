@@ -10,3 +10,4 @@ dist/
 *~
 npm-shrinkwrap.json
 assets/qrcode.png
+.secrets/

@@ -94,11 +94,14 @@ This will watch for changes and rebuild automatically.
 │       └── index.ts
 ├── assets/
 │   └── qrcode.png        # QR code for installation (generated once)
-├── scripts/
-│   └── publish.js        # Publishing automation script
 ├── dist/                 # Build output (gitignored)
 │   ├── config.json       # Minified plugin configuration
 │   └── script.js         # Minified and compiled script
+├── .secrets/             # Private keys (gitignored)
+│   └── signing_key.pem   # RSA private key for signing
+├── scripts/
+│   ├── sign.js           # Plugin signing script
+│   └── publish.js        # Publishing automation script
 ├── package.json
 ├── tsconfig.json
 ├── rollup.config.js
@@ -134,30 +137,32 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Releases
 
-### Automated Publishing (Recommended)
+## 🚀 Publishing
 
 ```bash
-# Set your GitHub token once
-export GITHUB_TOKEN=your_github_personal_access_token
+# Publish a new version (auto-bumps patch version)
+npm run publish
 
-# Build and publish a new version
-npm run build:publish [version]
+# Publish with specific version
+npm run publish 5
+
+# Or build, sign, and publish in one command
+npm run build:publish
 ```
 
-The script will:
+The publish script will:
+1. ✅ Bump the version (or set to specified version)
+2. ✅ Build the plugin
+3. ✅ Sign the plugin (generate signature and public key)
+4. ✅ Generate a QR code for installation
+5. ✅ Commit changes
+6. ✅ Create a git tag
+7. ✅ Push to GitHub (triggers release workflow)
 
-1. Build the plugin with `npm run build`
-2. Trigger the GitHub release workflow with the specified version
-3. The workflow will update config.json, build, generate QR code, and create a release
+### Prerequisites
 
-### Manual Publishing
-
-1. Go to Actions → Release Plugin
-2. Click "Run workflow"
-3. Enter the new version number
-4. The workflow will build, update the version, generate QR code, and create a GitHub release
-
-**Note:** Get a GitHub Personal Access Token at https://github.com/settings/tokens with `repo` permissions.
+- **OpenSSL**: Required for signing (usually pre-installed on Linux/Mac, available via Git Bash on Windows)
+- **Git**: With configured remote repository
 
 ## Support
 
