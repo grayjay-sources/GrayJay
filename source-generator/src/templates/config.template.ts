@@ -21,7 +21,7 @@ function getRepoName(repoUrl: string): string {
 export function generateConfigJson(config: SourceConfig): string {
   const packageNames: string[] = ['Http'];
   
-  if (config.uses.includes('html') || config.uses.includes('webscraping')) {
+  if (config.usesHtml || config.usesWebscraping) {
     packageNames.push('DOMParser');
   }
 
@@ -35,7 +35,7 @@ export function generateConfigJson(config: SourceConfig): string {
     scriptUrl: './script.js',
     repositoryUrl: config.repositoryUrl,
     version: config.version || 1,
-    iconUrl: config.resolvedLogoUrl || 'https://grayjay.app/images/webclip.png',
+    iconUrl: config.logoUrl || 'https://grayjay.app/images/webclip.png',
     id: generateSimpleUUID(),
     scriptSignature: '',
     scriptPublicKey: '',

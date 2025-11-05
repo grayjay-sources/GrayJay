@@ -129,13 +129,18 @@ export async function promptForConfig(): Promise<SourceConfig> {
     authorUrl: answers.authorUrl || undefined,
     repositoryUrl: answers.repositoryUrl,
     baseUrl: answers.baseUrl,
-    uses: answers.uses,
+    logoUrl: answers.logoUrl || undefined,
+    // Convert uses array to individual flags
+    usesApi: answers.uses.includes('api'),
+    usesGraphql: answers.uses.includes('graphql'),
+    usesHtml: answers.uses.includes('html'),
+    usesWebscraping: answers.uses.includes('webscraping'),
+    // Feature flags
     hasAuth: answers.hasAuth,
     hasLiveStreams: answers.hasLiveStreams,
     hasComments: answers.hasComments,
     hasPlaylists: answers.hasPlaylists,
     hasSearch: answers.hasSearch,
-    logoUrl: answers.logoUrl || undefined,
     version: 1
   };
 }

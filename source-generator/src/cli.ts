@@ -21,12 +21,16 @@ program
   .option('--author-url <url>', 'Author URL')
   .option('-r, --repository-url <url>', 'Repository URL')
   .option('-b, --base-url <url>', 'Base API URL')
-  .option('-u, --uses <technologies>', 'Comma-separated list of technologies (api,graphql,html,webscraping)')
-  .option('--auth', 'Enable authentication support')
-  .option('--live', 'Enable live streams support')
-  .option('--comments', 'Enable comments support')
-  .option('--playlists', 'Enable playlists support')
-  .option('--search', 'Enable search support')
+  .option('--logo-url <url>', 'Logo URL (optional, auto-resolves from favicon if not provided)')
+  .option('--uses-api', 'Use REST API')
+  .option('--uses-graphql', 'Use GraphQL API')
+  .option('--uses-html', 'Use HTML parsing/scraping')
+  .option('--uses-webscraping', 'Use web scraping')
+  .option('--uses-auth', 'Enable authentication support')
+  .option('--uses-live', 'Enable live streams support')
+  .option('--uses-comments', 'Enable comments support')
+  .option('--uses-playlists', 'Enable playlists support')
+  .option('--uses-search', 'Enable search support')
   .option('-o, --output <directory>', 'Output directory', '.')
   .option('-i, --interactive', 'Interactive mode (prompt for all options)')
   .option('--js', 'Generate JavaScript project instead of TypeScript')
@@ -53,9 +57,6 @@ async function main() {
         process.exit(1);
       }
 
-      // Parse uses
-      const uses = options.uses ? options.uses.split(',').map((s: string) => s.trim()) : ['api'];
-
       config = {
         name: options.name,
         platformUrl: options.platformUrl,
@@ -64,14 +65,25 @@ async function main() {
         authorUrl: options.authorUrl,
         repositoryUrl: options.repositoryUrl,
         baseUrl: options.baseUrl,
-        uses: uses,
-        hasAuth: options.auth || false,
-        hasLiveStreams: options.live || false,
-        hasComments: options.comments !== false,
-        hasPlaylists: options.playlists !== false,
-        hasSearch: options.search !== false,
+        logoUrl: options.logoUrl,
+        // Technology flags (default to API if none specified)
+        usesApi: options.usesApi,
+        usesGraphql: options.usesGraphql,
+        usesHtml: options.usesHtml,
+        usesWebscraping: options.usesWebscraping,
+        // Feature flags (only enabled if explicitly requested)
+        hasAuth: options.usesAuth,
+        hasLiveStreams: options.usesLive,
+        hasComments: options.usesComments,
+        hasPlaylists: options.usesPlaylists,
+        hasSearch: options.usesSearch,
         version: 1
       };
+      
+      // Default to API if no technology specified
+      if (!config.usesApi && !config.usesGraphql && !config.usesHtml && !config.usesWebscraping) {
+        config.usesApi = true;
+      }
     }
 
     // Validate URLs
@@ -111,15 +123,15 @@ async function main() {
     console.log(chalk.gray(`  1. cd ${path.basename(outputDir)}`));
     console.log(chalk.gray('  2. npm install'));
     console.log(chalk.gray('  3. npm run build'));
-    console.log(chalk.gray('  4. Edit src/Script.ts to implement your source logic\n'));
+    console.log(chalk.gray('  4. Edit src/script.ts to implement your source logic\n'));
     
     console.log(chalk.white('Project structure:\n'));
-    console.log(chalk.gray('  📁 src/          - Source code'));
-    console.log(chalk.gray('  📁 assets/       - Icons and images'));
+    console.log(chalk.gray('  📁 src/          - Modular source code'));
+    console.log(chalk.gray('  📁 assets/       - QR code for installation'));
+    console.log(chalk.gray('  📁 scripts/      - Automation scripts'));
     console.log(chalk.gray('  📁 types/        - Type definitions'));
     console.log(chalk.gray('  📄 config.json   - Plugin configuration'));
-    console.log(chalk.gray('  📄 README.md     - Documentation'));
-    console.log(chalk.gray('  🖼️  qrcode.png    - Installation QR code\n'));
+    console.log(chalk.gray('  📄 README.md     - Documentation\n'));
 
     console.log(chalk.yellow('⚠️  Don\'t forget to:\n'));
     console.log(chalk.gray('  - Update the generated code with your actual API calls'));

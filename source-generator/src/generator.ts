@@ -13,18 +13,21 @@ export class SourceGenerator {
   }
 
   private getCapabilities(): PluginCapabilities {
-    const { uses, hasAuth, hasLiveStreams, hasComments, hasPlaylists, hasSearch } = this.options.config;
+    const { 
+      usesApi, usesGraphql, usesHtml, usesWebscraping,
+      hasAuth, hasLiveStreams, hasComments, hasPlaylists, hasSearch 
+    } = this.options.config;
     
     return {
-      useGraphQL: uses.includes('graphql'),
-      useAPI: uses.includes('api'),
-      useHTML: uses.includes('html'),
-      useWebScraping: uses.includes('webscraping'),
+      useGraphQL: usesGraphql || false,
+      useAPI: usesApi || false,
+      useHTML: usesHtml || false,
+      useWebScraping: usesWebscraping || false,
       hasAuth: hasAuth || false,
       hasLiveStreams: hasLiveStreams || false,
       hasComments: hasComments || false,
       hasPlaylists: hasPlaylists || false,
-      hasSearch: hasSearch !== false, // Default to true
+      hasSearch: hasSearch || false,
     };
   }
 
@@ -36,8 +39,7 @@ export class SourceGenerator {
 
     // Resolve logo URL first (before generating config)
     console.log('\n📷 Resolving logo URL...');
-    const resolvedLogoUrl = await resolveLogoUrl(config.platformUrl, config.logoUrl);
-    this.options.config.resolvedLogoUrl = resolvedLogoUrl;
+    config.logoUrl = await resolveLogoUrl(config.platformUrl, config.logoUrl);
 
     // Generate package.json
     await this.generatePackageJson();
@@ -198,18 +200,25 @@ export class SourceGenerator {
     const repoNameMatch = config.repositoryUrl.match(/github\.com\/[^\/]+\/([^\/]+)/);
     const repoName = repoNameMatch ? repoNameMatch[1].replace(/\.git$/, '') : 'repo';
     
+    // Build tech stack list from flags
+    const techStack: string[] = [];
+    if (config.usesApi) techStack.push('- REST API');
+    if (config.usesGraphql) techStack.push('- GRAPHQL');
+    if (config.usesHtml) techStack.push('- HTML');
+    if (config.usesWebscraping) techStack.push('- WEB SCRAPING');
+    
     const readme = await this.getFormattedTemplate('snippets/readme-template.md', {
       PLATFORM_NAME: config.name,
       DESCRIPTION: config.description,
       GITHUB_USER: githubUser,
       REPO_NAME: repoName,
       REPOSITORY_URL: config.repositoryUrl,
-      HAS_SEARCH: config.hasSearch !== false ? 'x' : ' ',
+      HAS_SEARCH: config.hasSearch ? 'x' : ' ',
       HAS_AUTH: config.hasAuth ? 'x' : ' ',
       HAS_LIVE_STREAMS: config.hasLiveStreams ? 'x' : ' ',
       HAS_COMMENTS: config.hasComments ? 'x' : ' ',
       HAS_PLAYLISTS: config.hasPlaylists ? 'x' : ' ',
-      TECH_STACK: config.uses.map(tech => `- ${tech.toUpperCase()}`).join('\n'),
+      TECH_STACK: techStack.join('\n') || '- API',
       PLATFORM_URL: config.platformUrl,
       BASE_URL: config.baseUrl,
       AUTHOR_INFO: config.authorUrl 

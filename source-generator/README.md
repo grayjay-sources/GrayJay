@@ -52,11 +52,12 @@ grayjay-generate \
   --author "Your Name" \
   --repository-url "https://github.com/username/repo" \
   --base-url "https://api.example.com" \
-  --uses "api,graphql" \
-  --auth \
-  --comments \
-  --playlists \
-  --search
+  --uses-api \
+  --uses-graphql \
+  --uses-auth \
+  --uses-comments \
+  --uses-playlists \
+  --uses-search
 ```
 
 ### Options
@@ -70,12 +71,16 @@ grayjay-generate \
 | `--description <text>` | `-d` | Platform description | No |
 | `--author <name>` | `-a` | Author name | No |
 | `--author-url <url>` | | Author URL | No |
-| `--uses <list>` | `-u` | Technologies: api,graphql,html,webscraping | No |
-| `--auth` | | Enable authentication support | No |
-| `--live` | | Enable live streams support | No |
-| `--comments` | | Enable comments support | No |
-| `--playlists` | | Enable playlists support | No |
-| `--search` | | Enable search support | No |
+| `--logo-url <url>` | | Logo URL (auto-resolves from favicon if omitted) | No |
+| `--uses-api` | | Use REST API | No |
+| `--uses-graphql` | | Use GraphQL API | No |
+| `--uses-html` | | Use HTML parsing | No |
+| `--uses-webscraping` | | Use web scraping | No |
+| `--uses-auth` | | Enable authentication support | No |
+| `--uses-live` | | Enable live streams support | No |
+| `--uses-comments` | | Enable comments support | No |
+| `--uses-playlists` | | Enable playlists support | No |
+| `--uses-search` | | Enable search support | No |
 | `--output <dir>` | `-o` | Output directory | No |
 | `--interactive` | `-i` | Force interactive mode | No |
 | `--js` | | Generate JavaScript instead of TypeScript | No |
@@ -92,10 +97,11 @@ grayjay-generate \
   --author "Bluscream" \
   --repository-url "https://github.com/grayjay-sources/vimeo" \
   --base-url "https://api.vimeo.com" \
-  --uses "api,graphql" \
-  --auth \
-  --comments \
-  --playlists
+  --uses-api \
+  --uses-graphql \
+  --uses-auth \
+  --uses-comments \
+  --uses-playlists
 ```
 
 ### Example 2: Minimal Command (Interactive Prompts for Rest)

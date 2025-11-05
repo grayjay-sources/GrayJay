@@ -6,15 +6,19 @@ export interface SourceConfig {
   authorUrl?: string;
   repositoryUrl: string;
   baseUrl: string;
-  uses: string[]; // e.g., ['graphql', 'api', 'html', 'webscraping']
+  logoUrl?: string; // Logo URL (auto-resolved from favicon if not provided)
+  // Technology flags
+  usesApi?: boolean;
+  usesGraphql?: boolean;
+  usesHtml?: boolean;
+  usesWebscraping?: boolean;
+  // Feature flags (all optional, only enabled if explicitly requested)
   hasAuth?: boolean;
   hasLiveStreams?: boolean;
   hasComments?: boolean;
   hasPlaylists?: boolean;
   hasSearch?: boolean;
   version?: number;
-  logoUrl?: string; // Optional URL to logo (will auto-resolve from favicon if not provided)
-  resolvedLogoUrl?: string; // The final resolved logo URL (from logoUrl or favicon)
 }
 
 export interface GeneratorOptions {
