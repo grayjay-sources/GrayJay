@@ -13,6 +13,7 @@ export interface SourceConfig {
   hasPlaylists?: boolean;
   hasSearch?: boolean;
   version?: number;
+  logoUrl?: string; // Optional URL to fetch logo from
 }
 
 export interface GeneratorOptions {

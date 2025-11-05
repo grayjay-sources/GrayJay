@@ -31,13 +31,13 @@ module.exports = {
     }),
     copy({
       targets: [
-        { 
-          src: "config.json", 
+        {
+          src: "config.json",
           dest,
           transform: (contents) => {
             // Minify JSON by removing whitespace
             return JSON.stringify(JSON.parse(contents.toString()));
-          }
+          },
         },
       ],
     }),

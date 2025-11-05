@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GeneratorOptions, PluginCapabilities } from './types';
 import { generateConfigJson } from './templates/config.template';
-import { generateQRCode, generatePlaceholderIcon, ensureAssetsDirectory } from './assets';
+import { generateQRCode, generatePlaceholderIcon, ensureAssetsDirectory, fetchAndConvertLogo } from './assets';
 
 export class SourceGenerator {
   private options: GeneratorOptions;
@@ -70,6 +70,12 @@ export class SourceGenerator {
 
     // Generate plugin types
     await this.generatePluginTypes();
+    
+    // Generate scripts directory
+    await this.generateScripts();
+    
+    // Generate GitHub workflows
+    await this.generateWorkflows();
   }
 
   private async generatePackageJson(): Promise<void> {
@@ -218,17 +224,26 @@ export class SourceGenerator {
     const assetsDir = await ensureAssetsDirectory(this.options.outputDir);
     const { config } = this.options;
 
-    // Generate placeholder logo
+    // Try to fetch logo from URL or favicon, fallback to placeholder
     const logoPath = path.join(assetsDir, 'logo.png');
-    await generatePlaceholderIcon(logoPath, config.name);
+    console.log('\n📷 Generating logo...');
+    
+    const logoFetched = await fetchAndConvertLogo(
+      config.platformUrl,
+      logoPath,
+      config.logoUrl
+    );
+    
+    if (!logoFetched) {
+      console.log('🎨 Generating placeholder logo...');
+      await generatePlaceholderIcon(logoPath, config.name);
+    }
 
     // Generate QR code in assets directory
-    const githubUserMatch = config.repositoryUrl.match(/github\.com\/([^\/]+)/);
-    const githubUser = githubUserMatch ? githubUserMatch[1] : 'username';
-    const repoNameMatch = config.repositoryUrl.match(/github\.com\/[^\/]+\/([^\/]+)/);
-    const repoName = repoNameMatch ? repoNameMatch[1].replace(/\.git$/, '') : 'repo';
-    const qrUrl = `grayjay://plugin/https://github.com/${githubUser}/${repoName}/releases/latest/download/config.json`;
+    const qrUrl = `grayjay://plugin/${config.repositoryUrl}/releases/latest/download/config.json`;
     const qrPath = path.join(assetsDir, 'qrcode.png');
+    
+    console.log('\n📱 Generating QR code...');
     await generateQRCode(qrUrl, qrPath);
   }
 
@@ -287,6 +302,30 @@ export class SourceGenerator {
     await fs.writeFile(
       path.join(typesDir, 'plugin.d.ts'),
       pluginTypes
+    );
+  }
+
+  private async generateScripts(): Promise<void> {
+    const scriptsDir = path.join(this.options.outputDir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+
+    // Generate QR code generation script
+    const qrScript = await this.getRawTemplate('scripts/generate-qr.js');
+    await fs.writeFile(
+      path.join(scriptsDir, 'generate-qr.js'),
+      qrScript
+    );
+  }
+
+  private async generateWorkflows(): Promise<void> {
+    const workflowsDir = path.join(this.options.outputDir, '.github', 'workflows');
+    await fs.mkdir(workflowsDir, { recursive: true });
+
+    // Generate release workflow
+    const releaseWorkflow = await this.getRawTemplate('.github/workflows/release.yml');
+    await fs.writeFile(
+      path.join(workflowsDir, 'release.yml'),
+      releaseWorkflow
     );
   }
 
@@ -422,6 +461,9 @@ export class SourceGenerator {
       HTML_HELPER: htmlHelper,
       SEARCH_PAGERS: searchPagers,
       COMMENT_PAGERS: commentPagers,
+      MAPPERS: mappersHelper,
+      PAGERS: pagersHelper,
+      STATE_MANAGEMENT: stateManagement
     });
   }
 }

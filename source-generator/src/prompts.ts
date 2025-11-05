@@ -112,6 +112,12 @@ export async function promptForConfig(): Promise<SourceConfig> {
       name: 'hasSearch',
       message: 'Does this source support search?',
       default: true
+    },
+    {
+      type: 'input',
+      name: 'logoUrl',
+      message: 'Logo URL (optional, will fetch favicon from platform URL if not provided):',
+      default: ''
     }
   ]);
 
@@ -129,6 +135,7 @@ export async function promptForConfig(): Promise<SourceConfig> {
     hasComments: answers.hasComments,
     hasPlaylists: answers.hasPlaylists,
     hasSearch: answers.hasSearch,
+    logoUrl: answers.logoUrl || undefined,
     version: 1
   };
 }
