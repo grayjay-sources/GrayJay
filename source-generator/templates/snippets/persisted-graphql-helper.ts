@@ -132,4 +132,3 @@ function executeGqlQuery(query: string, variables?: Record<string, any>): [any, 
 function log(message: string) {
   console.log(`[${PLATFORM}] ${message}`);
 }
-

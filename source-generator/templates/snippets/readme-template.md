@@ -1,34 +1,29 @@
-import { SourceConfig } from '../types';
+# {{PLATFORM_NAME}} Plugin for GrayJay
 
-export function generateReadme(config: SourceConfig): string {
-  const qrPath = config.repositoryUrl ? `${config.repositoryUrl}/raw/main/qrcode.png` : './qrcode.png';
-  
-  return `# ${config.name} Plugin for GrayJay
-
-${config.description}
+{{DESCRIPTION}}
 
 ## Installation
 
 Scan this QR code with the GrayJay app to install the plugin:
 
-![QR Code](${qrPath})
+![QR Code]({{QR_PATH}})
 
-Or click [here](${config.repositoryUrl}) to install manually.
+Or click [here]({{REPOSITORY_URL}}) to install manually.
 
 ## Features
 
-- [${config.hasSearch ? 'x' : ' '}] Search
-- [${config.hasAuth ? 'x' : ' '}] Authentication
-- [${config.hasLiveStreams ? 'x' : ' '}] Live Streams
-- [${config.hasComments ? 'x' : ' '}] Comments
-- [${config.hasPlaylists ? 'x' : ' '}] Playlists
+- [{{HAS_SEARCH}}] Search
+- [{{HAS_AUTH}}] Authentication
+- [{{HAS_LIVE_STREAMS}}] Live Streams
+- [{{HAS_COMMENTS}}] Comments
+- [{{HAS_PLAYLISTS}}] Playlists
 - [x] Home Feed
 - [x] Channel Details
 - [x] Video Details
 
 ## Technology Stack
 
-${config.uses.map(tech => `- ${tech.toUpperCase()}`).join('\n')}
+{{TECH_STACK}}
 
 ## Development
 
@@ -39,29 +34,29 @@ ${config.uses.map(tech => `- ${tech.toUpperCase()}`).join('\n')}
 
 ### Installation
 
-\`\`\`bash
+```bash
 npm install
-\`\`\`
+```
 
 ### Build
 
-\`\`\`bash
+```bash
 npm run build
-\`\`\`
+```
 
-This will generate the plugin files in the \`dist/\` directory.
+This will generate the plugin files in the `dist/` directory.
 
 ### Development Mode
 
-\`\`\`bash
+```bash
 npm run dev
-\`\`\`
+```
 
 This will watch for changes and rebuild automatically.
 
 ## Project Structure
 
-\`\`\`
+```
 .
 ├── src/
 │   ├── Script.ts          # Main plugin script
@@ -78,7 +73,7 @@ This will watch for changes and rebuild automatically.
 ├── tsconfig.json
 ├── rollup.config.js
 └── README.md
-\`\`\`
+```
 
 ## Configuration
 
@@ -88,10 +83,10 @@ The plugin can be configured through the GrayJay app settings:
 
 ## Platform Information
 
-- **Platform URL**: ${config.platformUrl}
-- **Base API URL**: ${config.baseUrl}
-${config.authorUrl ? `- **Author**: [${config.author}](${config.authorUrl})` : `- **Author**: ${config.author}`}
-- **Repository**: ${config.repositoryUrl}
+- **Platform URL**: {{PLATFORM_URL}}
+- **Base API URL**: {{BASE_URL}}
+{{AUTHOR_INFO}}
+- **Repository**: {{REPOSITORY_URL}}
 
 ## License
 
@@ -102,18 +97,16 @@ MIT License - See LICENSE file for details
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 1. Fork the repository
-2. Create your feature branch (\`git checkout -b feature/amazing-feature\`)
-3. Commit your changes (\`git commit -m 'Add some amazing feature'\`)
-4. Push to the branch (\`git push origin feature/amazing-feature\`)
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
 ## Support
 
-For issues and questions, please use the [GitHub Issues](${config.repositoryUrl}/issues) page.
+For issues and questions, please use the [GitHub Issues]({{REPOSITORY_URL}}/issues) page.
 
 ## Acknowledgments
 
 - Built for [GrayJay](https://grayjay.app/)
 - Generated using [@grayjay/source-generator](https://www.npmjs.com/package/@grayjay/source-generator)
-`;
-}

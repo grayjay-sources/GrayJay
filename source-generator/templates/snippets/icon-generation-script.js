@@ -2,8 +2,8 @@ const sharp = require("sharp");
 const fs = require("fs");
 
 async function generateIcon() {
-  const svgPath = "assets/{{PLATFORM_NAME}}Icon.svg";
-  const pngPath = "assets/{{PLATFORM_NAME}}Icon.png";
+  const svgPath = "assets/logo.svg";
+  const pngPath = "assets/logo.png";
 
   if (!fs.existsSync(svgPath)) {
     console.error(`❌ SVG not found: ${svgPath}`);

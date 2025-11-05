@@ -1,7 +1,4 @@
-import { SourceConfig } from '../types';
-
-export function generateUtils(config: SourceConfig): string {
-  return `// Utility functions for ${config.name}
+// Utility functions for {{PLATFORM_NAME}}
 
 /**
  * Safely parse JSON with error handling
@@ -82,7 +79,7 @@ export function parseDuration(duration: string): number {
   if (!duration) return 0;
   
   // ISO 8601 duration format
-  const match = duration.match(/PT(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?/);
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
   
   const hours = parseInt(match[1] || '0');
@@ -99,7 +96,7 @@ export function parseFormattedNumber(str: string): number {
   if (!str) return 0;
   
   const normalized = str.toUpperCase().replace(/,/g, '');
-  const match = normalized.match(/([\\d.]+)([KMB])?/);
+  const match = normalized.match(/([\d.]+)([KMB])?/);
   
   if (!match) return 0;
   
@@ -132,7 +129,7 @@ export async function retry<T>(
       lastError = error;
       
       if (attempt < maxAttempts) {
-        log(\`Attempt \${attempt} failed, retrying in \${delayMs}ms...\`);
+        log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
         // Note: sleep() is not available in GrayJay, so this is just a placeholder
         // You would need to implement actual retry logic based on your needs
       }
@@ -158,8 +155,8 @@ export function chunkArray<T>(array: T[], chunkSize: number): T[][] {
  */
 export function stripHtml(html: string): string {
   return html
-    .replace(/<script[^>]*>([\\s\\S]*?)<\\/script>/gi, '')
-    .replace(/<style[^>]*>([\\s\\S]*?)<\\/style>/gi, '')
+    .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, '')
+    .replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, '')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
@@ -218,7 +215,5 @@ export function createThumbnails(urls: string[], widths?: number[]): Thumbnails 
  * Log helper (respects debug setting)
  */
 function log(message: string): void {
-  console.log('[${config.name}] ' + message);
-}
-`;
+  console.log('[{{PLATFORM_NAME}}] ' + message);
 }

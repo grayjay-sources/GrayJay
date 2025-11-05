@@ -3,9 +3,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GeneratorOptions, PluginCapabilities } from './types';
 import { generateConfigJsonSimple } from './templates/config.template';
-import { generateReadme } from './templates/readme.template';
-import { generateUtils } from './templates/utils.template';
-import { generateConstants } from './templates/constants.template';
 import { generateQRCode, generatePlaceholderIcon, ensureAssetsDirectory } from './assets';
 
 export class SourceGenerator {
@@ -175,7 +172,27 @@ export class SourceGenerator {
   }
 
   private async generateReadmeFile(): Promise<void> {
-    const readme = generateReadme(this.options.config);
+    const { config } = this.options;
+    const qrPath = config.repositoryUrl ? `${config.repositoryUrl}/raw/main/qrcode.png` : './qrcode.png';
+    
+    const readme = await this.getFormattedTemplate('snippets/readme-template.md', {
+      PLATFORM_NAME: config.name,
+      DESCRIPTION: config.description,
+      QR_PATH: qrPath,
+      REPOSITORY_URL: config.repositoryUrl,
+      HAS_SEARCH: config.hasSearch !== false ? 'x' : ' ',
+      HAS_AUTH: config.hasAuth ? 'x' : ' ',
+      HAS_LIVE_STREAMS: config.hasLiveStreams ? 'x' : ' ',
+      HAS_COMMENTS: config.hasComments ? 'x' : ' ',
+      HAS_PLAYLISTS: config.hasPlaylists ? 'x' : ' ',
+      TECH_STACK: config.uses.map(tech => `- ${tech.toUpperCase()}`).join('\n'),
+      PLATFORM_URL: config.platformUrl,
+      BASE_URL: config.baseUrl,
+      AUTHOR_INFO: config.authorUrl 
+        ? `- **Author**: [${config.author}](${config.authorUrl})`
+        : `- **Author**: ${config.author}`
+    });
+    
     await fs.writeFile(
       path.join(this.options.outputDir, 'README.md'),
       readme
@@ -222,7 +239,13 @@ export class SourceGenerator {
 
   private async generateConstants(): Promise<void> {
     const srcDir = path.join(this.options.outputDir, 'src');
-    const constants = generateConstants(this.options.config);
+    const { config } = this.options;
+    
+    const constants = await this.getFormattedTemplate('snippets/constants-template.ts', {
+      PLATFORM_NAME: config.name,
+      BASE_URL: config.baseUrl,
+      PLATFORM_URL: config.platformUrl
+    });
 
     await fs.writeFile(
       path.join(srcDir, 'constants.ts'),
@@ -232,7 +255,11 @@ export class SourceGenerator {
 
   private async generateUtilsFile(): Promise<void> {
     const srcDir = path.join(this.options.outputDir, 'src');
-    const utils = generateUtils(this.options.config);
+    const { config } = this.options;
+    
+    const utils = await this.getFormattedTemplate('snippets/utils-template.ts', {
+      PLATFORM_NAME: config.name
+    });
     
     await fs.writeFile(
       path.join(srcDir, 'utils.ts'),
