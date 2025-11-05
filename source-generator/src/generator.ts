@@ -97,7 +97,6 @@ export class SourceGenerator {
         'build:publish': 'npm run build && npm run publish',
         dev: 'rollup -c -w',
         prettier: 'npx prettier --write ./src/**/*.ts',
-        'generate-qr': 'node scripts/generate-qr.js',
         publish: 'node scripts/publish.js'
       },
       engines: {
@@ -144,7 +143,12 @@ export class SourceGenerator {
     await fs.mkdir(srcDir, { recursive: true });
 
     const capabilities = this.getCapabilities();
-    const script = await this.assembleScript(capabilities);
+    
+    // Generate modular file structure
+    await this.generateModularStructure(capabilities);
+    
+    // Generate main script that imports from modules
+    const script = await this.assembleMainScript(capabilities);
     
     await fs.writeFile(
       path.join(srcDir, 'script.ts'),
@@ -301,14 +305,7 @@ export class SourceGenerator {
     const scriptsDir = path.join(this.options.outputDir, 'scripts');
     await fs.mkdir(scriptsDir, { recursive: true });
 
-    // Generate QR code generation script
-    const qrScript = await this.getRawTemplate('scripts/generate-qr.js');
-    await fs.writeFile(
-      path.join(scriptsDir, 'generate-qr.js'),
-      qrScript
-    );
-
-    // Generate publish script
+    // Only generate publish script (QR is generated once during project creation)
     const publishScript = await this.getRawTemplate('scripts/publish.js');
     await fs.writeFile(
       path.join(scriptsDir, 'publish.js'),
@@ -390,7 +387,159 @@ export class SourceGenerator {
   }
 
   /**
+   * Generate modular file structure with separate folders for different concerns
+   */
+  private async generateModularStructure(capabilities: PluginCapabilities): Promise<void> {
+    const srcDir = path.join(this.options.outputDir, 'src');
+    const { config } = this.options;
+    const platformHostname = new URL(config.platformUrl).hostname.toLowerCase();
+
+    const commonReplacements = {
+      PLATFORM_NAME: config.name,
+      BASE_URL: config.baseUrl,
+      PLATFORM_HOSTNAME: platformHostname,
+      AUTH_HEADER: capabilities.hasAuth 
+        ? `'Authorization': state.authToken ? 'Bearer ' + state.authToken : ''`
+        : '',
+    };
+
+    // Generate GraphQL module
+    if (capabilities.useGraphQL) {
+      const graphqlDir = path.join(srcDir, 'graphql');
+      await fs.mkdir(graphqlDir, { recursive: true });
+      
+      const queriesContent = await this.getSnippet('persisted-graphql-helper', commonReplacements);
+      await fs.writeFile(path.join(graphqlDir, 'queries.ts'), queriesContent);
+    }
+
+    // Generate API module
+    if (capabilities.useAPI) {
+      const apiDir = path.join(srcDir, 'api');
+      await fs.mkdir(apiDir, { recursive: true });
+      
+      const clientContent = await this.getSnippet('api-helper', commonReplacements);
+      await fs.writeFile(path.join(apiDir, 'client.ts'), clientContent);
+    }
+
+    // Generate HTML parsing module
+    if (capabilities.useHTML) {
+      const htmlDir = path.join(srcDir, 'html');
+      await fs.mkdir(htmlDir, { recursive: true });
+      
+      const helperContent = await this.getSnippet('html-helper', commonReplacements);
+      await fs.writeFile(path.join(htmlDir, 'parser.ts'), helperContent);
+    }
+
+    // Generate mappers module
+    if (capabilities.hasPlaylists || capabilities.hasLiveStreams) {
+      const mappersDir = path.join(srcDir, 'mappers');
+      await fs.mkdir(mappersDir, { recursive: true });
+      
+      const mappersContent = await this.getSnippet('mappers-template', commonReplacements);
+      await fs.writeFile(path.join(mappersDir, 'index.ts'), mappersContent);
+    }
+
+    // Generate pagers module
+    if (capabilities.hasPlaylists || capabilities.hasSearch) {
+      const pagersDir = path.join(srcDir, 'pagers');
+      await fs.mkdir(pagersDir, { recursive: true });
+      
+      let pagersContent = '';
+      if (capabilities.hasSearch) {
+        pagersContent += await this.getSnippet('search-pagers', commonReplacements) + '\n\n';
+      }
+      if (capabilities.hasComments) {
+        pagersContent += await this.getSnippet('comment-pagers', commonReplacements);
+      }
+      
+      if (pagersContent) {
+        await fs.writeFile(path.join(pagersDir, 'index.ts'), pagersContent);
+      }
+    }
+
+    // Generate state management module
+    if (capabilities.hasAuth) {
+      const stateDir = path.join(srcDir, 'state');
+      await fs.mkdir(stateDir, { recursive: true });
+      
+      const stateContent = await this.getSnippet('state-management', commonReplacements);
+      await fs.writeFile(path.join(stateDir, 'index.ts'), stateContent);
+    }
+  }
+
+  /**
+   * Assemble the main script that imports from modules
+   */
+  private async assembleMainScript(capabilities: PluginCapabilities): Promise<string> {
+    const { config } = this.options;
+    const platformHostname = new URL(config.platformUrl).hostname.toLowerCase();
+
+    const commonReplacements = {
+      PLATFORM_NAME: config.name,
+      BASE_URL: config.baseUrl,
+      PLATFORM_HOSTNAME: platformHostname,
+      AUTH_HEADER: capabilities.hasAuth 
+        ? `'Authorization': state.authToken ? 'Bearer ' + state.authToken : ''`
+        : '',
+    };
+
+    // Build imports section
+    let imports = '';
+    if (capabilities.useGraphQL) {
+      imports += `import { executeGqlQuery } from './graphql/queries';\n`;
+    }
+    if (capabilities.useAPI) {
+      imports += `import { apiClient } from './api/client';\n`;
+    }
+    if (capabilities.useHTML) {
+      imports += `import { parseHtml } from './html/parser';\n`;
+    }
+    if (capabilities.hasPlaylists || capabilities.hasLiveStreams) {
+      imports += `import * as Mappers from './mappers';\n`;
+    }
+    if (capabilities.hasPlaylists || capabilities.hasSearch) {
+      imports += `import * as Pagers from './pagers';\n`;
+    }
+    if (capabilities.hasAuth) {
+      imports += `import { StateManager } from './state';\n`;
+    }
+
+    // Load method implementations
+    const searchMethods = capabilities.hasSearch 
+      ? await this.getSnippet('search-methods', commonReplacements) 
+      : '';
+    const playlistMethods = capabilities.hasPlaylists 
+      ? await this.getSnippet('playlist-methods', commonReplacements) 
+      : '';
+    const commentMethods = capabilities.hasComments 
+      ? await this.getSnippet('comment-methods', commonReplacements) 
+      : '';
+    const authMethods = capabilities.hasAuth 
+      ? await this.getSnippet('auth-methods', commonReplacements) 
+      : '';
+
+    // Assemble the main script
+    return await this.getFormattedTemplate('script.template.ts', {
+      ...commonReplacements,
+      IMPORTS: imports,
+      SEARCH_METHODS: searchMethods,
+      PLAYLIST_METHODS: playlistMethods,
+      COMMENT_METHODS: commentMethods,
+      AUTH_METHODS: authMethods,
+      GRAPHQL_HELPER: '', // Now imported
+      API_HELPER: '', // Now imported
+      HTML_HELPER: '', // Now imported
+      SEARCH_PAGERS: '', // Now imported
+      COMMENT_PAGERS: '', // Now imported
+      MAPPERS: '', // Now imported
+      PAGERS: '', // Now imported
+      STATE_MANAGEMENT: '' // Now imported
+    });
+  }
+
+  /**
    * Assemble the main script from template and snippets based on capabilities
+   * @deprecated Use generateModularStructure + assembleMainScript instead
    */
   private async assembleScript(capabilities: PluginCapabilities): Promise<string> {
     const { config } = this.options;

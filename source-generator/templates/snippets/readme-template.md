@@ -79,11 +79,23 @@ This will watch for changes and rebuild automatically.
 ```
 .
 ├── src/
-│   ├── Script.ts          # Main plugin script
-│   ├── constants.ts       # Constants and configuration
-│   └── ...               # Additional source files
+│   ├── script.ts         # Main plugin entry point
+│   ├── constants.ts      # Constants and configuration
+│   ├── utils.ts          # Utility functions
+│   ├── graphql/          # GraphQL module (if applicable)
+│   │   └── queries.ts
+│   ├── api/              # API client module (if applicable)
+│   │   └── client.ts
+│   ├── mappers/          # Data mapping (if applicable)
+│   │   └── index.ts
+│   ├── pagers/           # Pagination classes (if applicable)
+│   │   └── index.ts
+│   └── state/            # State management (if applicable)
+│       └── index.ts
 ├── assets/
-│   └── qrcode.png        # QR code for installation (generated)
+│   └── qrcode.png        # QR code for installation (generated once)
+├── scripts/
+│   └── publish.js        # Publishing automation script
 ├── dist/                 # Build output (gitignored)
 │   ├── config.json       # Minified plugin configuration
 │   └── script.js         # Minified and compiled script
@@ -133,6 +145,7 @@ npm run build:publish [version]
 ```
 
 The script will:
+
 1. Build the plugin with `npm run build`
 2. Trigger the GitHub release workflow with the specified version
 3. The workflow will update config.json, build, generate QR code, and create a release
