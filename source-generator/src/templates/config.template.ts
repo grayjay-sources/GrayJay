@@ -19,8 +19,6 @@ function getRepoName(repoUrl: string): string {
 }
 
 export function generateConfigJson(config: SourceConfig): string {
-  const githubUser = getGitHubUsername(config.repositoryUrl);
-  const repoName = getRepoName(config.repositoryUrl);
   const packageNames: string[] = ['Http'];
   
   if (config.uses.includes('html') || config.uses.includes('webscraping')) {
@@ -37,7 +35,7 @@ export function generateConfigJson(config: SourceConfig): string {
     scriptUrl: './script.js',
     repositoryUrl: config.repositoryUrl,
     version: config.version || 1,
-    iconUrl: `${config.repositoryUrl}/raw/main/assets/logo.png`,
+    iconUrl: config.resolvedLogoUrl || '',
     id: generateSimpleUUID(),
     scriptSignature: '',
     scriptPublicKey: '',

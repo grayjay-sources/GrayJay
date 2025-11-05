@@ -139,40 +139,31 @@ async function findFaviconUrl(platformUrl: string): Promise<string | null> {
 }
 
 /**
- * Fetch and convert favicon to PNG logo
+ * Resolve logo URL from custom URL or favicon detection
+ * Returns the URL without downloading to avoid DMCA issues
  */
-export async function fetchAndConvertLogo(
+export async function resolveLogoUrl(
   platformUrl: string,
-  outputPath: string,
   customLogoUrl?: string
-): Promise<boolean> {
+): Promise<string | null> {
   try {
-    const logoUrl = customLogoUrl || await findFaviconUrl(platformUrl);
-    
-    if (!logoUrl) {
-      console.log('❌ No favicon found, will use placeholder');
-      return false;
+    if (customLogoUrl) {
+      console.log(`✅ Using provided logo URL: ${customLogoUrl}`);
+      return customLogoUrl;
     }
     
-    console.log(`📥 Downloading logo from ${logoUrl}...`);
-    const imageBuffer = await downloadFile(logoUrl);
+    const faviconUrl = await findFaviconUrl(platformUrl);
     
-    // Convert to PNG and resize to 512x512
-    console.log('🎨 Converting to PNG (512x512)...');
-    await sharp(imageBuffer)
-      .resize(512, 512, {
-        fit: 'contain',
-        background: { r: 255, g: 255, b: 255, alpha: 0 }
-      })
-      .png()
-      .toFile(outputPath);
+    if (!faviconUrl) {
+      console.log('❌ No favicon found');
+      return null;
+    }
     
-    console.log(`✅ Logo saved to ${outputPath}`);
-    return true;
+    console.log(`✅ Resolved logo URL: ${faviconUrl}`);
+    return faviconUrl;
     
   } catch (error) {
-    console.warn(`⚠️  Failed to fetch/convert logo: ${error}`);
-    console.log('ℹ️  Will use placeholder instead');
-    return false;
+    console.warn(`⚠️  Failed to resolve logo URL: ${error}`);
+    return null;
   }
 }

@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GeneratorOptions, PluginCapabilities } from './types';
 import { generateConfigJson } from './templates/config.template';
-import { generateQRCode, generatePlaceholderIcon, ensureAssetsDirectory, fetchAndConvertLogo } from './assets';
+import { generateQRCode, ensureAssetsDirectory, resolveLogoUrl } from './assets';
 
 export class SourceGenerator {
   private options: GeneratorOptions;
@@ -33,6 +33,11 @@ export class SourceGenerator {
 
     // Create base directory
     await fs.mkdir(outputDir, { recursive: true });
+
+    // Resolve logo URL first (before generating config)
+    console.log('\n📷 Resolving logo URL...');
+    const resolvedLogoUrl = await resolveLogoUrl(config.platformUrl, config.logoUrl);
+    this.options.config.resolvedLogoUrl = resolvedLogoUrl || undefined;
 
     // Generate package.json
     await this.generatePackageJson();
@@ -223,21 +228,6 @@ export class SourceGenerator {
   private async generateAssets(): Promise<void> {
     const assetsDir = await ensureAssetsDirectory(this.options.outputDir);
     const { config } = this.options;
-
-    // Try to fetch logo from URL or favicon, fallback to placeholder
-    const logoPath = path.join(assetsDir, 'logo.png');
-    console.log('\n📷 Generating logo...');
-    
-    const logoFetched = await fetchAndConvertLogo(
-      config.platformUrl,
-      logoPath,
-      config.logoUrl
-    );
-    
-    if (!logoFetched) {
-      console.log('🎨 Generating placeholder logo...');
-      await generatePlaceholderIcon(logoPath, config.name);
-    }
 
     // Generate QR code in assets directory
     const qrUrl = `grayjay://plugin/${config.repositoryUrl}/releases/latest/download/config.json`;

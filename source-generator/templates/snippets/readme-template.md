@@ -11,6 +11,7 @@ Click this link to install in GrayJay:
 **[Install Plugin](grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json)**
 
 Or use this URL:
+
 ```
 grayjay://plugin/https://github.com/{{GITHUB_USER}}/{{REPO_NAME}}/releases/latest/download/config.json
 ```
@@ -74,7 +75,6 @@ This will watch for changes and rebuild automatically.
 │   ├── constants.ts       # Constants and configuration
 │   └── ...               # Additional source files
 ├── assets/
-│   ├── logo.png          # Plugin icon
 │   └── qrcode.png        # QR code for installation (generated)
 ├── dist/                 # Build output (gitignored)
 │   ├── config.json       # Minified plugin configuration
@@ -95,7 +95,7 @@ The plugin can be configured through the GrayJay app settings:
 
 - **Platform URL**: {{PLATFORM_URL}}
 - **Base API URL**: {{BASE_URL}}
-{{AUTHOR_INFO}}
+  {{AUTHOR_INFO}}
 - **Repository**: {{REPOSITORY_URL}}
 
 ## License

@@ -13,7 +13,8 @@ export interface SourceConfig {
   hasPlaylists?: boolean;
   hasSearch?: boolean;
   version?: number;
-  logoUrl?: string; // Optional URL to fetch logo from
+  logoUrl?: string; // Optional URL to logo (will auto-resolve from favicon if not provided)
+  resolvedLogoUrl?: string; // The final resolved logo URL (from logoUrl or favicon)
 }
 
 export interface GeneratorOptions {
